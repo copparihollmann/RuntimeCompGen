@@ -1,5 +1,8 @@
 # CompGen -- Agent Operating Instructions
 
+> `AGENT.md` is now the canonical and more complete repository-local operating
+> manual. Read it first. This file remains for compatibility and legacy context.
+
 This file defines the rules, conventions, and constraints for AI agents
 working on the CompGen codebase. Read this before making any changes.
 
