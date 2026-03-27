@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
-
-import structlog
 
 from benchmarks.record import (
     AgenticMetrics,
@@ -16,7 +15,7 @@ from benchmarks.record import (
     SolverMetrics,
 )
 
-log = structlog.get_logger()
+log = logging.getLogger(__name__)
 
 
 def collect_capture_metrics(

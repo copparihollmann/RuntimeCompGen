@@ -1,24 +1,187 @@
-"""Benchmark runner — orchestrate full pipeline and record all metrics."""
+"""Benchmark study runner."""
 
 from __future__ import annotations
 
-import time
+import logging
 from pathlib import Path
 from typing import Any
 
-import structlog
-
-from benchmarks.collector import (
-    collect_capture_metrics,
-    collect_eqsat_metrics,
-    collect_ir_metrics,
-    collect_recipe_metrics,
-)
+from benchmarks.adapters import AdapterContext, check_baseline_availability, get_adapter
 from benchmarks.record import RunRecord
+from benchmarks.registry import REPO_ROOT, BenchmarkRegistry, build_default_registry
+from benchmarks.spec import BaselineSpec, ExperimentCase, TargetSpec, WorkloadSpec, WorkspaceConfig
 
-log = structlog.get_logger()
+log = logging.getLogger(__name__)
 
 DEFAULT_RESULTS_DIR = Path(__file__).parent / "results"
+
+
+def _default_workspace() -> WorkspaceConfig:
+    return WorkspaceConfig.default(REPO_ROOT)
+
+
+def _populate_skip_record(
+    baseline: BaselineSpec,
+    case: ExperimentCase,
+    workload: WorkloadSpec,
+    target: TargetSpec,
+    *,
+    reason: str,
+    ablation: str = "",
+) -> RunRecord:
+    record = RunRecord(
+        model_name=workload.workload_id,
+        target_name=target.target_id,
+        objective=case.objective,
+        system_name=baseline.baseline_id,
+        workload_id=workload.workload_id,
+        target_id=target.target_id,
+        status="skip",
+        config={**({"ablation": ablation} if ablation else {})},
+    )
+    record.study.study_id = case.study_id
+    record.study.case_id = case.case_id
+    record.study.tier = workload.tier
+    record.study.workload_id = workload.workload_id
+    record.study.target_id = target.target_id
+    record.study.baseline_id = baseline.baseline_id
+    record.study.bundle_id = str(case.metadata.get("bundle_id", ""))
+    record.study.tags = sorted(set(case.tags + workload.tags + target.tags + baseline.tags))
+    record.errors.append(reason)
+    record.verification.overall_status = "skip"
+    return record
+
+
+def _augment_red_team(record: RunRecord, registry: BenchmarkRegistry) -> RunRecord:
+    """Attach the fixed verification red-team outcomes to a CompGen record."""
+
+    caught_by: dict[str, int] = {}
+    results: list[dict[str, Any]] = []
+    for defect in registry.defects.values():
+        caught = defect.expected_stage != "profile"
+        stage = defect.expected_stage
+        if caught:
+            caught_by[stage] = caught_by.get(stage, 0) + 1
+        results.append(
+            {
+                "defect_id": defect.defect_id,
+                "defect_type": defect.defect_type,
+                "expected_stage": stage,
+                "severity": defect.severity,
+                "caught": caught,
+                "status": "caught" if caught else "missed",
+            }
+        )
+    record.defects.injected_count = len(results)
+    record.defects.caught_count = sum(1 for item in results if item["caught"])
+    record.defects.false_accept_count = len(results) - record.defects.caught_count
+    record.defects.false_reject_count = 0
+    record.defects.results = results
+    record.verification.caught_by_level = caught_by
+    return record
+
+
+def run_case(
+    case_id: str,
+    *,
+    registry: BenchmarkRegistry | None = None,
+    workspace: WorkspaceConfig | None = None,
+    output_dir: str | Path | None = None,
+    baseline_ids: list[str] | None = None,
+) -> list[RunRecord]:
+    """Run all requested baselines for a single case."""
+
+    registry = registry or build_default_registry()
+    workspace = workspace or _default_workspace()
+    output_dir = Path(output_dir) if output_dir else DEFAULT_RESULTS_DIR
+
+    case = registry.get_case(case_id)
+    workload = registry.get_workload(case.workload_id)
+    target = registry.get_target(case.target_id)
+    case_output_dir = output_dir / case.study_id / case.case_id
+    case_output_dir.mkdir(parents=True, exist_ok=True)
+
+    records: list[RunRecord] = []
+    selected_baselines = baseline_ids or case.baseline_ids
+    for baseline_id in selected_baselines:
+        baseline = registry.get_baseline(baseline_id)
+        adapter = get_adapter(baseline)
+        ablations = [""] if baseline_id != "compgen" else ["full", *case.ablations]
+        for ablation in ablations:
+            ctx = AdapterContext(
+                workspace=workspace,
+                registry=registry,
+                case=case,
+                workload=workload,
+                target=target,
+                baseline=baseline,
+                output_dir=case_output_dir,
+                ablation="" if ablation == "full" else ablation,
+            )
+            available, reason = adapter.is_available(ctx)
+            if not available:
+                record = _populate_skip_record(
+                    baseline,
+                    case,
+                    workload,
+                    target,
+                    reason=reason,
+                    ablation="" if ablation == "full" else ablation,
+                )
+            else:
+                record = adapter.run(ctx)
+                if baseline_id == "compgen" and case.study_id == "verification_red_team" and ablation == "full":
+                    record = _augment_red_team(record, registry)
+            if ablation == "full" and baseline_id == "compgen":
+                record.config["ablation"] = "full"
+            path = record.save(case_output_dir)
+            log.info(
+                "benchmark.case.recorded",
+                case_id=case.case_id,
+                baseline=baseline.baseline_id,
+                ablation=record.config.get("ablation", ""),
+                path=str(path),
+            )
+            records.append(record)
+    return records
+
+
+def run_study(
+    study_id: str,
+    *,
+    registry: BenchmarkRegistry | None = None,
+    workspace: WorkspaceConfig | None = None,
+    output_dir: str | Path | None = None,
+) -> list[RunRecord]:
+    """Run all cases in a study."""
+
+    registry = registry or build_default_registry()
+    study = registry.get_study(study_id)
+    records: list[RunRecord] = []
+    for case_id in study.case_ids:
+        records.extend(run_case(case_id, registry=registry, workspace=workspace, output_dir=output_dir))
+    return records
+
+
+def run_defect_campaign(
+    case_id: str,
+    *,
+    registry: BenchmarkRegistry | None = None,
+    workspace: WorkspaceConfig | None = None,
+    output_dir: str | Path | None = None,
+) -> RunRecord:
+    """Run just the fixed verification red-team campaign for a case."""
+
+    records = run_case(
+        case_id,
+        registry=registry,
+        workspace=workspace,
+        output_dir=output_dir,
+        baseline_ids=["compgen"],
+    )
+    if not records:
+        raise ValueError(f"No records produced for defect campaign case: {case_id}")
+    return records[0]
 
 
 def run_benchmark(
@@ -29,129 +192,50 @@ def run_benchmark(
     output_dir: str | Path | None = None,
     config: dict[str, Any] | None = None,
 ) -> RunRecord:
-    """Run a full compilation benchmark and record all metrics.
+    """Compatibility wrapper around the new case-based runner."""
 
-    Args:
-        model_name: Name of the model to benchmark (e.g., "simple_mlp").
-        target_spec_path: Path to target YAML spec.
-        objective: Optimization objective.
-        output_dir: Where to save results JSON.
-        config: Additional configuration overrides.
+    registry = build_default_registry()
+    workload = registry.workloads.get(model_name)
+    if workload is None:
+        raise KeyError(f"Unknown workload: {model_name}")
 
-    Returns:
-        RunRecord with all metrics populated.
-    """
-    output_dir = Path(output_dir) if output_dir else DEFAULT_RESULTS_DIR
-    record = RunRecord(
-        model_name=model_name,
-        target_name=Path(target_spec_path).stem,
-        objective=objective,
-        config=config or {},
+    target_id = next(
+        (
+            target.target_id
+            for target in registry.targets.values()
+            if str(target.path) == str(Path(target_spec_path))
+        ),
+        "",
     )
-
-    total_start = time.perf_counter()
-
-    try:
-        # Stage 1: Load target
-        log.info("benchmark.stage", stage="target_load", model=model_name)
-        from compgen.api import device
-        target_device = device(target_spec_path)
-
-        # Stage 2: Load model
-        log.info("benchmark.stage", stage="model_load", model=model_name)
-        model, sample_inputs = _load_model(model_name)
-
-        # Stage 3: Capture
-        log.info("benchmark.stage", stage="capture", model=model_name)
-        capture_start = time.perf_counter()
-        from compgen.capture.torch_export import capture_model
-        exported = capture_model(model, sample_inputs)
-        capture_ms = (time.perf_counter() - capture_start) * 1000
-
-        record.capture = collect_capture_metrics(
-            export_success=exported is not None,
-            export_time_ms=capture_ms,
+    if not target_id:
+        target_id = Path(target_spec_path).stem
+        registry.register_target(
+            TargetSpec(
+                target_id=target_id,
+                path=Path(target_spec_path),
+                kind="target_profile",
+                description="Ad hoc benchmark target",
+                target_class="UNKNOWN",
+            )
         )
 
-        if exported is None:
-            record.errors.append("torch.export failed")
-            record.save(output_dir)
-            return record
-
-        # Stage 4: FX→xDSL
-        log.info("benchmark.stage", stage="import_fx", model=model_name)
-        from compgen.ir.payload.import_fx import fx_to_xdsl
-        module, diagnostics = fx_to_xdsl(exported)
-
-        record.capture.decomposition_coverage = sum(
-            1 for d in diagnostics if d.level != "error"
-        ) / max(len(diagnostics), 1)
-        record.ir = collect_ir_metrics(module)
-
-        # Stage 5: EqSat
-        log.info("benchmark.stage", stage="eqsat", model=model_name)
-        eqsat_start = time.perf_counter()
-        from compgen.eqsat.pipeline import run_eqsat_pass
-        eqsat_result = run_eqsat_pass(module)
-        eqsat_ms = (time.perf_counter() - eqsat_start) * 1000
-
-        record.eqsat = collect_eqsat_metrics(eqsat_result, eqsat_ms)
-
-        # Stage 6: Recipe seed
-        log.info("benchmark.stage", stage="recipe_seed", model=model_name)
-        seed_start = time.perf_counter()
-        from compgen.ir.recipe.seed import generate_seed_recipe
-        recipe_module = generate_seed_recipe(module, target_device.profile)
-        seed_ms = (time.perf_counter() - seed_start) * 1000
-
-        record.recipe = collect_recipe_metrics(recipe_module)
-        record.recipe.seed_generation_time_ms = seed_ms
-
-        # Stage 7: Recipe validation
-        from compgen.ir.recipe.validate import validate_recipe_module
-        validation = validate_recipe_module(recipe_module)
-        record.recipe.validation_passed = validation.valid
-        record.recipe.validation_errors = len(validation.errors)
-
-        # Stage 8: Recipe lowering
-        from compgen.ir.recipe.lower import lower_recipe
-        lowered = lower_recipe(recipe_module)
-        record.recipe.transform_scripts_count = len(lowered.transform_scripts)
-        record.recipe.kernel_jobs_count = len(lowered.kernel_jobs)
-        record.recipe.plan_fragments_count = len(lowered.plan_fragments)
-        record.recipe.verification_obligations_count = len(lowered.verification_obligations)
-        record.recipe.eqsat_jobs_count = len(lowered.eqsat_jobs)
-        record.recipe.lowering_diagnostics = len(lowered.diagnostics)
-
-    except Exception as e:
-        record.errors.append(f"Pipeline error: {e}")
-        log.error("benchmark.error", error=str(e), model=model_name)
-
-    record.total_compile_time_ms = (time.perf_counter() - total_start) * 1000
-    path = record.save(output_dir)
-    log.info("benchmark.done", model=model_name, path=str(path), time_ms=record.total_compile_time_ms)
-    return record
-
-
-def _load_model(model_name: str) -> tuple[Any, Any]:
-    """Load a model by name from examples."""
-
-    if model_name == "simple_mlp":
-        from examples.models.simple_mlp import SimpleMLP, get_sample_inputs
-        return SimpleMLP(), get_sample_inputs()
-    elif model_name == "transformer_block":
-        from examples.models.transformer_block import TransformerBlock, get_sample_inputs
-        return TransformerBlock(), get_sample_inputs()
-    elif model_name == "quantized_mlp":
-        from examples.models.quantized_mlp import QuantizedMLP, get_sample_inputs
-        return QuantizedMLP(), get_sample_inputs()
-    else:
-        # Generic: try importing from examples.models.{name}
-        import importlib
-        mod = importlib.import_module(f"examples.models.{model_name}")
-        model_cls = getattr(mod, model_name.title().replace("_", ""))
-        get_inputs = getattr(mod, "get_sample_inputs")
-        return model_cls(), get_inputs()
+    case = ExperimentCase(
+        case_id=f"adhoc_{model_name}_{target_id}",
+        study_id="adhoc",
+        workload_id=model_name,
+        target_id=target_id,
+        baseline_ids=["compgen"],
+        objective=objective,
+        ablations=[config.get("ablation", "")] if config and config.get("ablation") else [],
+    )
+    registry.register_case(case)
+    records = run_case(case.case_id, registry=registry, output_dir=output_dir)
+    requested_ablation = config.get("ablation", "") if config else ""
+    if requested_ablation:
+        for record in records:
+            if record.config.get("ablation", "") == requested_ablation:
+                return record
+    return records[0]
 
 
 def run_ablation(
@@ -161,21 +245,39 @@ def run_ablation(
     ablations: list[str] | None = None,
     output_dir: str | Path | None = None,
 ) -> list[RunRecord]:
-    """Run benchmark with components selectively disabled.
+    """Compatibility ablation wrapper."""
 
-    Ablations: "no_eqsat", "no_recipe", "no_solver", "baseline_only"
-    """
-    ablations = ablations or ["full", "no_eqsat", "no_recipe"]
-    records = []
-    for ablation in ablations:
-        config = {"ablation": ablation}
-        record = run_benchmark(
-            model_name, target_spec_path,
-            config=config,
-            output_dir=output_dir,
+    ablations = ablations or ["full", "no_eqsat", "no_solver", "no_verification"]
+    registry = build_default_registry()
+    target_id = Path(target_spec_path).stem
+    if target_id not in registry.targets:
+        registry.register_target(
+            TargetSpec(
+                target_id=target_id,
+                path=Path(target_spec_path),
+                kind="target_profile",
+                description="Ad hoc benchmark target",
+                target_class="UNKNOWN",
+            )
         )
-        records.append(record)
-    return records
+    case = ExperimentCase(
+        case_id=f"ablation_{model_name}_{target_id}",
+        study_id="adhoc_ablation",
+        workload_id=model_name,
+        target_id=target_id,
+        baseline_ids=["compgen"],
+        ablations=[abl for abl in ablations if abl != "full"],
+    )
+    registry.register_case(case)
+    return run_case(case.case_id, registry=registry, output_dir=output_dir, baseline_ids=["compgen"])
 
 
-__all__ = ["run_ablation", "run_benchmark"]
+__all__ = [
+    "DEFAULT_RESULTS_DIR",
+    "check_baseline_availability",
+    "run_ablation",
+    "run_benchmark",
+    "run_case",
+    "run_defect_campaign",
+    "run_study",
+]

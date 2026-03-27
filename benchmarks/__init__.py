@@ -1,4 +1,4 @@
-"""CompGen benchmarks — reproducible recording and visualization of all pipeline metrics."""
+"""CompGen benchmarks and MLSys study harness."""
 
 from __future__ import annotations
 

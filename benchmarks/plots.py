@@ -5,9 +5,13 @@ All plots save to PNG files. matplotlib is lazy-imported.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from benchmarks.record import RunRecord
+
+
+log = logging.getLogger(__name__)
 
 
 def _require_matplotlib():
@@ -404,6 +408,144 @@ def plot_latency_distribution(records: list[RunRecord], output_dir: str | Path) 
     return path
 
 
+# ---- Plot 11: Speedup CDF ----
+
+def plot_speedup_cdf(records: list[RunRecord], output_dir: str | Path) -> Path:
+    """CDF of speedup vs compiled baseline for comparable records."""
+    plt = _require_matplotlib()
+
+    speedups = sorted(
+        r.baselines.speedup_vs_compiled
+        for r in records
+        if r.baselines.speedup_vs_compiled > 0
+    )
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    if speedups:
+        yvals = [(i + 1) / len(speedups) for i in range(len(speedups))]
+        ax.step(speedups, yvals, where="post", color="#1f77b4", linewidth=2)
+    else:
+        ax.text(0.5, 0.5, "No speedup data", transform=ax.transAxes, ha="center")
+
+    ax.set_xlabel("Speedup vs torch.compile")
+    ax.set_ylabel("CDF")
+    ax.set_title("Speedup Distribution")
+    ax.grid(True, alpha=0.3)
+
+    path = _ensure_dir(Path(output_dir)) / "speedup_cdf.png"
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+# ---- Plot 12: Bring-up effort ----
+
+def plot_bringup_effort(records: list[RunRecord], output_dir: str | Path) -> Path:
+    """Bring-up effort comparison across systems."""
+    plt = _require_matplotlib()
+    import numpy as np
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    labels = [f"{r.system_name}\n{r.model_name}/{r.target_name}" for r in records]
+    x = np.arange(len(records))
+    first_correct = [r.productivity.person_hours_to_first_correct for r in records]
+    to_80 = [r.productivity.person_hours_to_80pct_expert for r in records]
+
+    ax.bar(x - 0.2, first_correct, 0.4, label="First Correct", color="#34495e")
+    ax.bar(x + 0.2, to_80, 0.4, label="80% Expert", color="#e67e22")
+    ax.set_ylabel("Person Hours")
+    ax.set_title("Bring-up Effort")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=8)
+    ax.legend()
+    ax.grid(True, axis="y", alpha=0.3)
+
+    path = _ensure_dir(Path(output_dir)) / "bringup_effort.png"
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+# ---- Plot 13: Artifact completeness ----
+
+def plot_artifact_completeness(records: list[RunRecord], output_dir: str | Path) -> Path:
+    """Bar chart of bundle artifact completeness."""
+    plt = _require_matplotlib()
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    labels = [f"{r.system_name}\n{r.model_name}/{r.target_name}" for r in records]
+    completeness = [r.artifacts.completeness_score * 100 for r in records]
+    ax.bar(range(len(records)), completeness, color="#2ecc71", alpha=0.85)
+    ax.set_ylabel("Completeness (%)")
+    ax.set_title("Artifact Completeness")
+    ax.set_xticks(range(len(records)))
+    ax.set_xticklabels(labels, fontsize=8)
+    ax.set_ylim(0, 100)
+    ax.grid(True, axis="y", alpha=0.3)
+
+    path = _ensure_dir(Path(output_dir)) / "artifact_completeness.png"
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+# ---- Plot 14: Verification catch matrix ----
+
+def plot_verification_catch_matrix(records: list[RunRecord], output_dir: str | Path) -> Path:
+    """Heatmap of caught defects by verification layer."""
+    plt = _require_matplotlib()
+    import numpy as np
+
+    levels = sorted({level for record in records for level in record.verification.caught_by_level} or {"none"})
+    fig, ax = plt.subplots(figsize=(10, max(3, len(records) * 0.6 + 1)))
+    matrix = []
+    labels = []
+    for record in records:
+        matrix.append([record.verification.caught_by_level.get(level, 0) for level in levels])
+        labels.append(f"{record.system_name}/{record.model_name}")
+    matrix_arr = np.array(matrix or [[0]])
+    ax.imshow(matrix_arr, aspect="auto", cmap="Blues")
+    ax.set_xticks(range(len(levels)))
+    ax.set_xticklabels(levels, fontsize=8, rotation=30, ha="right")
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels(labels, fontsize=8)
+    ax.set_title("Verification Catch Matrix")
+
+    path = _ensure_dir(Path(output_dir)) / "verification_catch_matrix.png"
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+# ---- Plot 15: Proposal funnel ----
+
+def plot_proposal_funnel(records: list[RunRecord], output_dir: str | Path) -> Path:
+    """Proposal-to-promotion funnel for the CompGen runs."""
+    plt = _require_matplotlib()
+    import numpy as np
+
+    compgen_records = [r for r in records if r.system_name == "compgen"]
+    explored = sum(r.generation.candidate_recipes_explored for r in compgen_records)
+    transforms = sum(r.generation.candidate_transforms for r in compgen_records)
+    rejected = sum(r.generation.rejected_by_verification for r in compgen_records)
+    promoted = sum(r.generation.promoted_candidates for r in compgen_records)
+
+    values = [explored, transforms, max(explored - rejected, 0), promoted]
+    labels = ["Explored", "Transforms", "Accepted", "Promoted"]
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.bar(np.arange(len(values)), values, color=["#95a5a6", "#3498db", "#2ecc71", "#9b59b6"])
+    ax.set_xticks(range(len(values)))
+    ax.set_xticklabels(labels)
+    ax.set_title("Proposal-to-Promotion Funnel")
+    ax.grid(True, axis="y", alpha=0.3)
+
+    path = _ensure_dir(Path(output_dir)) / "proposal_funnel.png"
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
 # ---- Master plot function ----
 
 def generate_all_plots(records: list[RunRecord], output_dir: str | Path) -> list[Path]:
@@ -425,6 +567,11 @@ def generate_all_plots(records: list[RunRecord], output_dir: str | Path) -> list
         plot_verification_ladder,
         plot_kernel_strategies,
         plot_latency_distribution,
+        plot_speedup_cdf,
+        plot_bringup_effort,
+        plot_artifact_completeness,
+        plot_verification_catch_matrix,
+        plot_proposal_funnel,
     ]
 
     for fn in plot_fns:
@@ -432,8 +579,7 @@ def generate_all_plots(records: list[RunRecord], output_dir: str | Path) -> list
             path = fn(records, output_dir)
             paths.append(path)
         except Exception as e:
-            import structlog
-            structlog.get_logger().warning("plot.failed", plot=fn.__name__, error=str(e))
+            log.warning("plot.failed %s: %s", fn.__name__, e)
 
     return paths
 
@@ -447,7 +593,12 @@ __all__ = [
     "plot_kernel_strategies",
     "plot_latency_distribution",
     "plot_llm_cost",
+    "plot_bringup_effort",
+    "plot_artifact_completeness",
+    "plot_proposal_funnel",
     "plot_recipe_composition",
     "plot_solver_metrics",
+    "plot_speedup_cdf",
+    "plot_verification_catch_matrix",
     "plot_verification_ladder",
 ]

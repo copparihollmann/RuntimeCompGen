@@ -18,12 +18,11 @@ import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from xdsl.dialects.builtin import ModuleOp
-from xdsl.printer import Printer
-
-from compgen.runtime.planner import ExecutionPlan
+if TYPE_CHECKING:
+    from compgen.runtime.planner import ExecutionPlan
+    from xdsl.dialects.builtin import ModuleOp
 
 
 @dataclass(frozen=True)
@@ -45,6 +44,7 @@ class BundleManifest:
     objective: str = "latency"
     artifacts: dict[str, str] = field(default_factory=dict)
     creation_timestamp: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for JSON output."""
@@ -55,6 +55,7 @@ class BundleManifest:
             "objective": self.objective,
             "artifacts": self.artifacts,
             "creation_timestamp": self.creation_timestamp,
+            "metadata": self.metadata,
         }
 
 
@@ -78,6 +79,12 @@ class BundleBuilder:
         golden_outputs: Any = None,
         kernel_files: dict[str, str] | None = None,
         transform_scripts: list[str] | None = None,
+        exported_program_text: str = "",
+        recipe_mlir_text: str = "",
+        recipe_yaml_text: str = "",
+        kernel_contracts: list[dict[str, Any]] | None = None,
+        verification_report: dict[str, Any] | None = None,
+        extra_artifacts: dict[str, str] | None = None,
     ) -> BundleManifest:
         """Build a complete artifact bundle.
 
@@ -99,6 +106,8 @@ class BundleBuilder:
         artifacts: dict[str, str] = {}
 
         # 1. Write payload.mlir
+        from xdsl.printer import Printer
+
         buf = io.StringIO()
         Printer(stream=buf).print_op(module)
         payload_path = root / "payload.mlir"
@@ -111,6 +120,23 @@ class BundleBuilder:
             plan_path = root / "execution_plan.yaml"
             plan_path.write_text(yaml.dump(execution_plan.to_dict(), default_flow_style=False))
             artifacts["execution_plan"] = "execution_plan.yaml"
+            if execution_plan.memory_plans:
+                memory_path = root / "memory_plan.yaml"
+                memory_path.write_text(
+                    yaml.dump(
+                        [
+                            {
+                                "device": plan.device_index,
+                                "peak_bytes": plan.peak_bytes,
+                                "address_space": plan.address_space,
+                                "physical_offset": plan.physical_offset,
+                            }
+                            for plan in execution_plan.memory_plans
+                        ],
+                        default_flow_style=False,
+                    )
+                )
+                artifacts["memory_plan"] = "memory_plan.yaml"
 
         # 3. Write golden I/O
         if golden_inputs is not None:
@@ -143,8 +169,42 @@ class BundleBuilder:
                 script_path.write_text(script)
             artifacts["transforms"] = "transforms/"
 
+        if exported_program_text:
+            exported_path = root / "exported_program.txt"
+            exported_path.write_text(exported_program_text)
+            artifacts["exported_program"] = "exported_program.txt"
+
+        if recipe_mlir_text:
+            recipe_mlir_path = root / "recipe.mlir"
+            recipe_mlir_path.write_text(recipe_mlir_text)
+            artifacts["recipe_mlir"] = "recipe.mlir"
+
+        if recipe_yaml_text:
+            recipe_yaml_path = root / "recipe.yaml"
+            recipe_yaml_path.write_text(recipe_yaml_text)
+            artifacts["recipe_yaml"] = "recipe.yaml"
+
+        if kernel_contracts is not None:
+            contracts_path = root / "kernel_contracts.json"
+            contracts_path.write_text(json.dumps(kernel_contracts, indent=2))
+            artifacts["kernel_contracts"] = "kernel_contracts.json"
+
+        if verification_report is not None:
+            verification_path = root / "verification_report.json"
+            verification_path.write_text(json.dumps(verification_report, indent=2))
+            artifacts["verification_report"] = "verification_report.json"
+
+        if extra_artifacts:
+            for name, content in extra_artifacts.items():
+                safe_name = f"{name}.txt"
+                extra_path = root / safe_name
+                extra_path.write_text(content)
+                artifacts[name] = safe_name
+
         # 6. Compute model hash
         model_hash = hashlib.sha256(buf.getvalue().encode()).hexdigest()[:16]
+
+        artifacts["manifest"] = "manifest.json"
 
         # 7. Write manifest.json
         manifest = BundleManifest(
@@ -154,6 +214,7 @@ class BundleBuilder:
             objective=objective,
             artifacts=artifacts,
             creation_timestamp=datetime.now(UTC).isoformat(),
+            metadata={"bundle_root": str(root)},
         )
         manifest_path = root / "manifest.json"
         manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2))

@@ -236,7 +236,9 @@ calibration_data/
 
 # MLIR build artifacts
 mlir_build/
-tmp
+tmp/*
+!tmp/agentic_documentation/
+!tmp/agentic_documentation/**
 compgen_output
 .claude
 
