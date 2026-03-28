@@ -403,34 +403,37 @@ def main() -> None:
         memory.close()
 
     # ===================================================================
-    # GATE 7: Unsupported-op recovery
+    # GATE 7: Unsupported-op recovery (fail → fix → succeed)
     # ===================================================================
     print("\n" + "=" * 70)
-    print("GATE 7: Unsupported-op detection + recovery")
+    print("GATE 7: Unsupported-op detection + recovery (fail→fix→succeed)")
     print("=" * 70)
 
-    from compgen.capture.unsupported.detect import (
-        UnsupportedOperatorIssue,
-        detect_unsupported_operators,
-    )
+    from compgen.capture.unsupported.detect import detect_unsupported_operators
     from compgen.capture.unsupported.introspect import build_operator_dossier
     from compgen.capture.unsupported.classify import classify_operator_issue
     from compgen.capture.unsupported.synthesize_translation import synthesize_payload_translation
+    from compgen.capture.unsupported.synthesize_decomp import synthesize_export_decomposition
     from compgen.capture.unsupported.verify import verify_unsupported_resolution
 
     try:
-        # Simulate an unsupported op detection with a real exported program
         ep_for_recovery = capture_model(model, sample_input)
 
-        # Run detection (may find 0 unsupported ops on a clean model)
-        supported = {"aten.linear.default", "aten.relu.default", "aten.addmm.default",
-                     "aten.t.default", "aten.mm.default", "aten.add.Tensor"}
+        # Use a NARROW supported set so some ops show as unsupported
+        narrow_supported = {"aten.relu.default"}
         issues = detect_unsupported_operators(
-            ep_for_recovery, supported_targets=supported,
+            ep_for_recovery, supported_targets=narrow_supported,
+        )
+
+        report.record(
+            "unsupported_detect",
+            len(issues) > 0,
+            f"Found {len(issues)} unsupported ops with narrow support set "
+            f"(targets: {[i.target for i in issues[:3]]})",
         )
 
         if issues:
-            # Real unsupported ops found — exercise the full pipeline
+            # Exercise full pipeline on the first issue
             issue = issues[0]
             dossier = build_operator_dossier(
                 issue.target,
@@ -441,22 +444,24 @@ def main() -> None:
             translation = synthesize_payload_translation(issue, dossier, classification)
             verification = verify_unsupported_resolution(issue, dossier, translation)
 
+            # Try decomposition synthesis
+            decomp = synthesize_export_decomposition(issue.target, dossier)
+
             report.record(
-                "unsupported_op_recovery",
+                "unsupported_recovery",
                 True,
-                f"Found {len(issues)} unsupported ops, "
-                f"first: {issue.target}, strategy={classification.strategy}, "
-                f"verified={verification.overall_ok}",
+                f"op={issue.target}, strategy={classification.strategy}, "
+                f"translation={'yes' if translation else 'no'}, "
+                f"decomp={'yes' if decomp else 'no'}, "
+                f"verified: schema={verification.schema_ok}, "
+                f"eager_ref={verification.eager_reference_ok}",
             )
         else:
-            # No unsupported ops — still a valid result for a clean model
-            report.record(
-                "unsupported_op_recovery",
-                True,
-                f"Model clean: 0 unsupported ops (all {len(supported)} targets supported)",
-            )
+            report.record("unsupported_recovery", False, "no unsupported ops found")
     except Exception as exc:
-        report.record("unsupported_op_recovery", False, str(exc))
+        if "unsupported_detect" not in report.gates:
+            report.record("unsupported_detect", False, str(exc))
+        report.record("unsupported_recovery", False, str(exc))
 
     # ===================================================================
     # GATE 8: Bundle creation with verification report
@@ -498,6 +503,143 @@ def main() -> None:
         )
     except Exception as exc:
         report.record("bundle_complete", False, str(exc))
+
+    # ===================================================================
+    # GATE 9: Promotion copies full bundle to recipe library
+    # ===================================================================
+    print("\n" + "=" * 70)
+    print("GATE 9: Promotion → recipe library with full artifacts")
+    print("=" * 70)
+
+    try:
+        from compgen.promotion.promote import RecipePromoter
+
+        library_path = output_dir / "recipe_library"
+        promoter = RecipePromoter(library_path=library_path)
+        promo_result = promoter.promote(manifest)
+
+        if promo_result.promoted and promo_result.recipe_path:
+            # Check that promoted dir has actual artifacts, not just manifest
+            promoted_files = list(promo_result.recipe_path.iterdir())
+            promoted_names = {f.name for f in promoted_files}
+            has_payload = "payload.mlir" in promoted_names
+            has_manifest = "manifest.json" in promoted_names
+            has_golden = "golden_inputs.pt" in promoted_names
+
+            report.record(
+                "promotion_full_bundle",
+                has_payload and has_manifest,
+                f"promoted to {promo_result.recipe_path.name}, "
+                f"files: {sorted(promoted_names)}, "
+                f"payload={has_payload}, manifest={has_manifest}, golden={has_golden}",
+            )
+        else:
+            report.record("promotion_full_bundle", False, promo_result.reason)
+    except Exception as exc:
+        report.record("promotion_full_bundle", False, str(exc))
+
+    # ===================================================================
+    # GATE 10: CLI `run` subcommand executes bundle
+    # ===================================================================
+    print("\n" + "=" * 70)
+    print("GATE 10: CLI run subcommand executes bundle")
+    print("=" * 70)
+
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["uv", "run", "compgen", "run", str(bundle_dir)],
+            capture_output=True, text=True, timeout=30,
+        )
+        cli_output = result.stdout + result.stderr
+        cli_ok = "Execution complete" in cli_output and result.returncode == 0
+
+        report.record(
+            "cli_run_bundle",
+            cli_ok,
+            f"exit={result.returncode}, "
+            f"output_lines={len(cli_output.splitlines())}",
+        )
+    except Exception as exc:
+        report.record("cli_run_bundle", False, str(exc))
+
+    # ===================================================================
+    # GATE 11: Hygiene — clean script + artifact placement
+    # ===================================================================
+    print("\n" + "=" * 70)
+    print("GATE 11: Hygiene — clean script + .gitignore")
+    print("=" * 70)
+
+    try:
+        import subprocess
+
+        # Test clean script runs without error (dry run — nothing to clean)
+        clean_result = subprocess.run(
+            ["uv", "run", "python", "scripts/clean_generated.py"],
+            capture_output=True, text=True, timeout=15,
+        )
+        report.record(
+            "hygiene_clean_script",
+            clean_result.returncode == 0,
+            f"exit={clean_result.returncode}",
+        )
+
+        # Verify .gitignore has the key patterns
+        gitignore = Path(".gitignore").read_text()
+        required_patterns = ["generated/staging/", ".compgen/", "artifacts/runs/"]
+        found = [p for p in required_patterns if p in gitignore]
+        report.record(
+            "hygiene_gitignore",
+            len(found) == len(required_patterns),
+            f"found {len(found)}/{len(required_patterns)} patterns: {found}",
+        )
+
+        # Verify Makefile exists with key targets
+        makefile = Path("Makefile").read_text()
+        required_targets = ["test:", "lint:", "clean"]
+        found_targets = [t for t in required_targets if t in makefile]
+        report.record(
+            "hygiene_makefile",
+            len(found_targets) == len(required_targets),
+            f"found {len(found_targets)}/{len(required_targets)} targets",
+        )
+    except Exception as exc:
+        report.record("hygiene_clean_script", False, str(exc))
+
+    # ===================================================================
+    # GATE 12: Failed verification produces readable artifacts
+    # ===================================================================
+    print("\n" + "=" * 70)
+    print("GATE 12: Failed verification produces readable failure")
+    print("=" * 70)
+
+    try:
+        fail_dir = output_dir / "verification" / "intentional_fail"
+        fail_result = verify_callable_against_reference(
+            name="intentional_fail",
+            ref_fn=lambda: torch.zeros(10),
+            got_fn=lambda: torch.ones(10),
+            out_dir=fail_dir,
+            atol=1e-5,
+            rtol=1e-5,
+        )
+
+        fail_json = json.loads((fail_dir / "verification.json").read_text())
+        readable = (
+            not fail_result.passed
+            and fail_json["passed"] is False
+            and fail_json["comparisons"][0]["num_mismatched"] == 10
+        )
+
+        report.record(
+            "failed_verification_readable",
+            readable,
+            f"passed={fail_result.passed}, mismatched={fail_result.comparisons[0].num_mismatched}, "
+            f"max_abs={fail_result.comparisons[0].max_abs_error:.2e}",
+        )
+    except Exception as exc:
+        report.record("failed_verification_readable", False, str(exc))
 
     # ===================================================================
     # SUMMARY
