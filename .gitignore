@@ -247,3 +247,23 @@ compgen_output/targetgen/
 
 # LLVM build artifacts (third_party/llvm-project)
 third_party/llvm-project/build/
+
+# CompGen generated artifacts (ephemeral)
+.compgen/
+artifacts/runs/
+artifacts/cache/
+artifacts/traces/
+artifacts/tmp/
+generated/staging/
+generated/scratch/
+
+# Local pack/build outputs
+third_party/**/build/
+third_party/**/.pixi/
+third_party/**/.snakemake/
+third_party/**/__pycache__/
+third_party/**/.pytest_cache/
+
+# Benchmark outputs
+benchmarks/results/
+benchmarks/tmp/
