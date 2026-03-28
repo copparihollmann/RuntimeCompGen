@@ -465,8 +465,8 @@ def run_exp6(models: list[str], target_path: str, budget: int,
         api_key = resolve_api_key("GOOGLE_API_KEY", "GEMINI_API_KEY", "GEMMINI_API")
         if api_key:
             from compgen.llm.gemini_client import GeminiClient
-            llm = GeminiClient(model="gemini-2.0-flash", api_key=api_key)
-            llm_label = "gemini-2.0-flash"
+            llm = GeminiClient(model="gemini-2.5-pro", api_key=api_key)
+            llm_label = "gemini-2.5-pro"
         else:
             from compgen.llm.mock_client import MockLLMClient
             llm = MockLLMClient(strict=False)
@@ -487,7 +487,8 @@ def run_exp6(models: list[str], target_path: str, budget: int,
             module, _ = fx_to_xdsl(ep)
 
             env = CompilerEnv()
-            env.reset(module=module, target=target, objective="latency", budget=budget)
+            env.reset(module=module, target=target, objective="latency", budget=budget,
+                      exported_program=ep)
 
             loop = AgenticCompilationLoop(llm_client=llm, env=env, budget=budget)
             result = loop.run(target)
