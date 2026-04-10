@@ -60,10 +60,6 @@ The same selection is mirrored into `COMPGEN_LLM_BACKEND` / `COMPGEN_LLM_MODEL` 
 - Hardware-spec example for `compgen.device(...)`: [`examples/hardware_specs/gpu_simt_demo.yaml`](examples/hardware_specs/gpu_simt_demo.yaml)
 - Demo model and script: [`examples/models/`](examples/models/) and [`scripts/e2e_demo.py`](scripts/e2e_demo.py)
 
-## Internal Documentation
-
-Roadmap, status, thesis, and detailed design material moved to `tmp/agentic_documentation/` so the main docs tree stays user-facing.
-
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
