@@ -1,4 +1,4 @@
-# CompGen
+# RuntimeCompGen
 
 CompGen is an LLM-driven compiler generator for heterogeneous hardware targets.
 
