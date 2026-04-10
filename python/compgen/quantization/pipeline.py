@@ -91,6 +91,7 @@ class PipelineReport:
     artifact_dir: Path | None = None
     errors: list[str] = field(default_factory=list)
     timings: dict[str, float] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> str:
         """One-line summary."""
@@ -218,6 +219,70 @@ class QuantizedModelPipeline:
             mxu_ops=analysis.estimated_mxu_ops,
         )
         return analysis
+
+    def step_build_patterns(self) -> None:
+        """Build the kernel pattern catalog and generate golden data."""
+        t0 = time.monotonic()
+        artifact = self._report.capture_artifact
+        if artifact is None or not artifact.graphs:
+            return
+
+        try:
+            from compgen.kernels.patterns.detection import detect_patterns_in_graphs
+            from compgen.kernels.patterns.catalog import build_pattern_catalog, export_pattern_catalog
+            from compgen.kernels.golden.generator import generate_golden_for_pattern
+            from compgen.kernels.golden.export import export_golden_data, export_test_harness
+            from compgen.passes.graph_decompose import run_decomposition_on_graphs
+
+            graphs = list(artifact.graphs)
+
+            # Run decomposition passes (annotate fusion patterns)
+            decomp_stats = run_decomposition_on_graphs(graphs)
+            logger.info("pipeline_decompose", **decomp_stats)
+
+            # Detect patterns
+            detected = detect_patterns_in_graphs(graphs)
+            logger.info("pipeline_patterns_detected", count=len(detected))
+
+            # Build catalog
+            patterns = build_pattern_catalog(detected)
+            logger.info("pipeline_pattern_catalog", patterns=len(patterns))
+
+            # Generate golden data for each pattern (small + real)
+            golden_cases = []
+            for pattern in patterns:
+                for variant in ("small", "real"):
+                    try:
+                        tc = generate_golden_for_pattern(pattern, variant=variant)
+                        if tc.expected_output is not None:
+                            golden_cases.append(tc)
+                    except Exception as e:
+                        logger.debug("golden_gen_skip", pattern=pattern.pattern_id, variant=variant, error=str(e))
+
+            # Export to artifacts
+            if self._output_dir:
+                patterns_dir = self._output_dir / "kernel_patterns"
+                export_pattern_catalog(patterns, patterns_dir)
+
+                golden_dir = self._output_dir / "kernel_patterns"
+                export_golden_data(golden_cases, golden_dir)
+
+                # Export test harnesses
+                for tc in golden_cases:
+                    harness_dir = golden_dir / tc.pattern_id
+                    export_test_harness(tc, harness_dir)
+
+                logger.info("pipeline_golden_data", cases=len(golden_cases), dir=str(golden_dir))
+
+            # Store in report for reference
+            self._report.metadata["pattern_count"] = len(patterns)
+            self._report.metadata["golden_cases"] = len(golden_cases)
+
+        except Exception as e:
+            self._report.errors.append(f"build_patterns: {e}")
+            logger.warning("pipeline_patterns_failed", error=str(e))
+
+        self._report.timings["build_patterns"] = time.monotonic() - t0
 
     def step_to_payload_ir(self) -> ModuleOp | None:
         """Convert captured FX graphs to Payload IR."""
@@ -381,10 +446,13 @@ class QuantizedModelPipeline:
         # 5. Analyze graph
         self.step_analyze_graph()
 
-        # 6. Convert to Payload IR
+        # 6. Build pattern catalog + golden data
+        self.step_build_patterns()
+
+        # 7. Convert to Payload IR
         self.step_to_payload_ir()
 
-        # 7. Save artifacts
+        # 8. Save artifacts
         self.step_save_artifacts()
 
         self._report.timings["total"] = time.monotonic() - total_t0

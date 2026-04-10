@@ -132,6 +132,10 @@ def run_smolvla_npu_pipeline(
         from compgen.quantization.kernel_contracts import format_contracts_report as fmt_kc
         print(f"\n{fmt_kc(kernel_contracts_list)}")
 
+    if report.metadata.get("pattern_count"):
+        print(f"\n  Kernel Patterns: {report.metadata['pattern_count']} reusable patterns")
+        print(f"  Golden Data: {report.metadata.get('golden_cases', 0)} test cases generated")
+
     if report.payload_ir_text:
         ir_lines = report.payload_ir_text.count("\n")
         print(f"\n  Payload IR: {ir_lines} lines")
