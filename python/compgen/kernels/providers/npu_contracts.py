@@ -15,7 +15,7 @@ Each contract specifies exactly what a kernel must implement:
 
 Usage::
 
-    from compgen.quantization.kernel_contracts import (
+    from compgen.kernels.providers.npu_contracts import (
         generate_npu_kernel_contracts,
         export_contracts_yaml,
     )
