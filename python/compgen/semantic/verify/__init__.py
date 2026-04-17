@@ -10,9 +10,9 @@ verification ladder (structural -> **functional** -> performance -> formal).
 
 from __future__ import annotations
 
-from compgen.verify.compare import ComparisonConfig, NumericComparison, compare_tensors
-from compgen.verify.eager_reference import EagerReference, build_eager_reference
-from compgen.verify.harness import VerificationRun, verify_callable_against_reference
+from compgen.semantic.verify.compare import ComparisonConfig, NumericComparison, compare_tensors
+from compgen.semantic.verify.eager_reference import EagerReference, build_eager_reference
+from compgen.semantic.verify.harness import VerificationRun, verify_callable_against_reference
 
 __all__ = [
     "ComparisonConfig",

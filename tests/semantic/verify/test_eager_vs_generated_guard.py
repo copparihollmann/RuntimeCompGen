@@ -11,9 +11,9 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-from compgen.verify.compare import DTYPE_PRESETS, compare_tensors
-from compgen.verify.eager_reference import build_eager_reference
-from compgen.verify.harness import verify_callable_against_reference
+from compgen.semantic.verify.compare import DTYPE_PRESETS, compare_tensors
+from compgen.semantic.verify.eager_reference import build_eager_reference
+from compgen.semantic.verify.harness import verify_callable_against_reference
 
 
 class _Linear(nn.Module):
