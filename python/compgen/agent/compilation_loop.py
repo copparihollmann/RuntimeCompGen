@@ -135,8 +135,8 @@ class AgenticCompilationLoop:
         if self.compiler_memory is not None:
             try:
                 from compgen.memory.schema import ObjectKind
-                from compgen.search.retrieve import SearchRetriever
-                from compgen.search.task import SearchTask
+                from compgen.memory.search.retrieve import SearchRetriever
+                from compgen.memory.search.task import SearchTask
 
                 task = self.compiler_memory.create_task(
                     kind=ObjectKind.BACKEND_PLAN,
@@ -363,7 +363,7 @@ class AgenticCompilationLoop:
         # Extract reusable knowledge from this search trajectory
         if self.compiler_memory is not None and total_improvement > 0:
             try:
-                from compgen.search.promote import SearchPromoter
+                from compgen.memory.search.promote import SearchPromoter
 
                 promoter = SearchPromoter(self.compiler_memory)
                 promoter.extract_knowledge(
