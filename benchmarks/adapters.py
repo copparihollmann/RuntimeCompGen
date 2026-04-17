@@ -337,7 +337,7 @@ class CompGenAdapter:
             from compgen.runtime.local_executor import LocalExecutor
             from compgen.runtime.planner import plan_execution
             from compgen.runtime.torch_backend import CompGenBackend
-            from compgen.synthesis.integration import synthesize_and_attach_guards
+            from compgen.semantic.synthesis.integration import synthesize_and_attach_guards
             from compgen.transforms.verify import TransformVerifier, VerificationLevel
 
             capture_start = time.perf_counter()

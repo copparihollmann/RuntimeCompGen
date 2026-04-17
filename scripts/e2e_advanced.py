@@ -114,12 +114,12 @@ def main() -> None:
     print("=" * 70)
 
     try:
-        from compgen.synthesis import (
+        from compgen.semantic.synthesis import (
             Var, Const, Cmp, CmpOp, and_, eval_guard,
             GuardSearchConfig, search_guard_fragments,
             SynthesisExample, expr_to_json, expr_from_json,
         )
-        from compgen.synthesis import promote_guard, GuardRegistry, GuardRuntime
+        from compgen.semantic.synthesis import promote_guard, GuardRegistry, GuardRuntime
 
         # Build synthetic examples for a fusion guard
         examples = [
