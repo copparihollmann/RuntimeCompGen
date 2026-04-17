@@ -506,7 +506,7 @@ def run_exp5(models: list[str], target_path: str, multi_path: str,
 def run_exp6(models: list[str], target_path: str, budget: int,
              out: Path, errors: dict[str, list[str]]) -> list[Any]:
     """Agentic compilation loop on select models."""
-    from compgen.agent.compilation_loop import AgenticCompilationLoop
+    from compgen.agent.loop import AgenticCompilationLoop
     from compgen.agent.env import CompilerEnv
     from compgen.capture.torch_export import capture_model
     from compgen.ir.payload.import_fx import fx_to_xdsl

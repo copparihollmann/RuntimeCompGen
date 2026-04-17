@@ -45,35 +45,10 @@ from compgen.agent.serialize import legal_actions_to_dict, observation_to_dict, 
 from compgen.llm.base import CompGenLLMProtocol, GenerationRequest, LLMConfig, Objective, PromptContext
 from compgen.targets.schema import TargetProfile
 
+from compgen.agent.loop import prompts
+from compgen.agent.loop.records import CompilationResult, IterationRecord
+
 log = structlog.get_logger()
-
-
-@dataclass(frozen=True)
-class IterationRecord:
-    """Record of one optimization iteration."""
-
-    iteration: int
-    action_type: str
-    target: str
-    applied: bool
-    cost_before_us: float
-    cost_after_us: float
-    improvement_pct: float
-    reasoning: str
-
-
-@dataclass(frozen=True)
-class CompilationResult:
-    """Result of the full agentic compilation loop."""
-
-    initial_cost_us: float
-    final_cost_us: float
-    total_improvement_pct: float
-    iterations_run: int
-    iterations_improved: int
-    history: list[IterationRecord]
-    best_observation: Observation | None = None
-    runtime_artifacts: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -506,7 +481,7 @@ class AgenticCompilationLoop:
                     promo_prompt = fmt_promo(promo_ctx)
                     promo_request = GenerationRequest(
                         prompt_template=promo_prompt,
-                        context=PromptContext(model_ir_summary="", target_profile_summary=self._target_summary(target)),
+                        context=PromptContext(model_ir_summary="", target_profile_summary=prompts.target_summary(target)),
                         config=self._llm_config(temperature=0.1, max_tokens=800),
                     )
                     promo_response = self._generate_with_schema(promo_request, PROMOTION_SCHEMA)
@@ -583,16 +558,16 @@ class AgenticCompilationLoop:
             unsupported_ops=list(obs.unsupported_ops),
             repeated_patterns=dict(getattr(dossier, "repeated_patterns", {})) if dossier else {},
             critical_path=list(getattr(dossier, "critical_path", ())) if dossier else [],
-            backend_viability=self._backend_viability_summary(obs),
-            analysis_summary=self._analysis_summary(obs),
-            legal_actions_summary=self._legal_actions_summary(legal_actions),
+            backend_viability=prompts.backend_viability_summary(obs),
+            analysis_summary=prompts.analysis_summary(obs),
+            legal_actions_summary=prompts.legal_actions_summary(legal_actions),
         )
         prompt = fmt_analyze(ctx)
 
         try:
             request = GenerationRequest(
                 prompt_template=prompt,
-                context=self._build_prompt_context(obs, target, legal_actions),
+                context=prompts.build_prompt_context(obs, target, legal_actions),
                 config=self._llm_config(temperature=0.2, max_tokens=1600),
             )
             response = self._generate_with_schema(request, ANALYSIS_SCHEMA)
@@ -633,9 +608,9 @@ class AgenticCompilationLoop:
             graph_break_count=obs.graph_break_count,
             guard_count=obs.guard_count,
             unsupported_ops=list(obs.unsupported_ops),
-            analysis_summary=self._analysis_summary(obs),
-            legal_actions_summary=self._legal_actions_summary(legal_actions),
-            verification_summary=self._verification_summary(obs),
+            analysis_summary=prompts.analysis_summary(obs),
+            legal_actions_summary=prompts.legal_actions_summary(legal_actions),
+            verification_summary=prompts.verification_summary(obs),
             error_patterns=error_pattern_dicts,
         )
         prompt = fmt_refine(ctx)
@@ -647,7 +622,7 @@ class AgenticCompilationLoop:
         try:
             request = GenerationRequest(
                 prompt_template=prompt,
-                context=self._build_prompt_context(obs, target, legal_actions, history=history),
+                context=prompts.build_prompt_context(obs, target, legal_actions, history=history),
                 config=self._llm_config(temperature=temperature, max_tokens=1200),
             )
             response = self._generate_with_schema(request, REFINEMENT_SCHEMA)
@@ -676,8 +651,8 @@ class AgenticCompilationLoop:
         legal_actions = self.env.legal_actions(max_actions=20)
         ctx = PlanContext(
             observation_summary=observation_to_prompt(obs, legal_actions),
-            history_summary="\n".join(self._prior_attempts(history)),
-            legal_actions_summary=self._legal_actions_summary(legal_actions),
+            history_summary="\n".join(prompts.prior_attempts(history)),
+            legal_actions_summary=prompts.legal_actions_summary(legal_actions),
             budget_remaining=self.budget - len(history),
         )
         prompt = fmt_plan(ctx)
@@ -685,7 +660,7 @@ class AgenticCompilationLoop:
         try:
             request = GenerationRequest(
                 prompt_template=prompt,
-                context=self._build_prompt_context(obs, target, legal_actions, history=history),
+                context=prompts.build_prompt_context(obs, target, legal_actions, history=history),
                 config=self._llm_config(temperature=0.3, max_tokens=2000),
             )
             response = self._generate_with_schema(request, PLAN_SCHEMA)
@@ -734,13 +709,13 @@ class AgenticCompilationLoop:
             summary = summarize_module(module)
             prompt = format_rule_proposal_prompt(
                 egraph_summary=summary.to_prompt() if hasattr(summary, "to_prompt") else str(summary),
-                target_description=self._target_summary(target),
+                target_description=prompts.target_summary(target),
                 objective="latency",
             )
 
             request = GenerationRequest(
                 prompt_template=prompt,
-                context=PromptContext(model_ir_summary="", target_profile_summary=self._target_summary(target)),
+                context=PromptContext(model_ir_summary="", target_profile_summary=prompts.target_summary(target)),
                 config=self._llm_config(temperature=0.3, max_tokens=2000),
             )
             response = self.llm_client.generate(request)
@@ -781,7 +756,7 @@ class AgenticCompilationLoop:
 
         try:
             ctx = SearchStateContext(
-                egraph_summary=self._analysis_summary(obs),
+                egraph_summary=prompts.analysis_summary(obs),
                 rule_stats={},
                 best_cost=obs.best_latency_us,
                 iteration=obs.step_count,
@@ -792,7 +767,7 @@ class AgenticCompilationLoop:
 
             request = GenerationRequest(
                 prompt_template=prompt,
-                context=PromptContext(model_ir_summary="", target_profile_summary=self._target_summary(target)),
+                context=PromptContext(model_ir_summary="", target_profile_summary=prompts.target_summary(target)),
                 config=self._llm_config(temperature=0.2, max_tokens=1200),
             )
             response = self._generate_with_schema(request, SEARCH_STATE_SCHEMA)
@@ -801,8 +776,8 @@ class AgenticCompilationLoop:
             if result and result.get("action") == "CHANGE_WEIGHTS":
                 # Ask for specific weights
                 w_ctx = WeightsContext(
-                    egraph_summary=self._analysis_summary(obs),
-                    target_description=self._target_summary(target),
+                    egraph_summary=prompts.analysis_summary(obs),
+                    target_description=prompts.target_summary(target),
                     current_fusion_weight=1.0,
                     current_transfer_weight=1.0,
                     current_backend_match_weight=1.0,
@@ -810,7 +785,7 @@ class AgenticCompilationLoop:
                 w_prompt = fmt_weights(w_ctx)
                 w_request = GenerationRequest(
                     prompt_template=w_prompt,
-                    context=PromptContext(model_ir_summary="", target_profile_summary=self._target_summary(target)),
+                    context=PromptContext(model_ir_summary="", target_profile_summary=prompts.target_summary(target)),
                     config=self._llm_config(temperature=0.2, max_tokens=800),
                 )
                 w_response = self._generate_with_schema(w_request, EXTRACTION_WEIGHTS_SCHEMA)
@@ -922,7 +897,7 @@ class AgenticCompilationLoop:
         try:
             request = GenerationRequest(
                 prompt_template=prompt,
-                context=PromptContext(model_ir_summary="", target_profile_summary=self._target_summary(target)),
+                context=PromptContext(model_ir_summary="", target_profile_summary=prompts.target_summary(target)),
                 config=self._llm_config(temperature=0.2, max_tokens=1200),
             )
             response = self._generate_with_schema(request, GLOBAL_STRATEGY_SCHEMA)
@@ -1066,159 +1041,6 @@ class AgenticCompilationLoop:
     def _model_id(self) -> str:
         return str(getattr(self.llm_client, "model", "default"))
 
-    def _build_prompt_context(
-        self,
-        obs: Observation,
-        target: TargetProfile,
-        legal_actions: list[Any],
-        history: list[IterationRecord] | None = None,
-    ) -> PromptContext:
-        return PromptContext(
-            model_ir_summary=observation_to_prompt(obs, legal_actions),
-            target_profile_summary=self._target_summary(target),
-            available_transforms=sorted({entry["type"] for entry in legal_actions_to_dict(legal_actions)}),
-            kernel_contracts=self._kernel_contracts(obs),
-            objective=Objective.LATENCY,
-            prior_attempts=self._prior_attempts(history or []),
-            hardware_feedback=self._verification_summary(obs),
-            frontend_diagnostics_summary=self._frontend_summary(obs),
-            analysis_dossier_summary=self._analysis_summary(obs),
-            unsupported_operator_summary=self._unsupported_summary(obs),
-            pack_summary=self._pack_summary(obs),
-            integration_branch_summary=self._integration_branch_summary(obs),
-            frontier_summary=self._frontier_summary(obs, history or []),
-            legal_action_summary=self._legal_actions_summary(legal_actions),
-            evidence_json=self._evidence_json(obs, legal_actions),
-        )
-
-    def _target_summary(self, target: TargetProfile) -> str:
-        device_parts = []
-        for device in target.devices:
-            max_mem = max((level.size_bytes for level in device.memory_hierarchy), default=0)
-            device_parts.append(f"{device.name}: memory={max_mem}B")
-        return f"{target.name}\n" + "\n".join(device_parts)
-
-    def _frontend_summary(self, obs: Observation) -> str:
-        lines = [
-            f"graph_breaks={obs.graph_break_count}",
-            f"guards={obs.guard_count}",
-            f"unsupported_ops={len(obs.unsupported_ops)}",
-        ]
-        if obs.unsupported_ops:
-            lines.append("targets=" + ", ".join(obs.unsupported_ops[:10]))
-        return "\n".join(lines)
-
-    def _analysis_summary(self, obs: Observation) -> str:
-        dossier = obs.analysis_dossier
-        if dossier is None:
-            return "analysis unavailable"
-        repeated = ", ".join(
-            f"{name}:{count}" for name, count in sorted(
-                dossier.repeated_patterns.items(), key=lambda item: (-item[1], item[0])
-            )[:8]
-        ) or "(none)"
-        lines = [
-            f"regions={dossier.total_regions}",
-            f"critical_path={list(dossier.critical_path[:8])}",
-            f"dynamic_shapes={list(dossier.dynamic_shape_regions[:8])}",
-            f"unsupported_targets={list(dossier.unsupported_targets[:8])}",
-            f"repeated_patterns={repeated}",
-        ]
-        for region in dossier.regions[:8]:
-            lines.append(
-                f"{region.region_id}: kind={region.kind} ai={region.arithmetic_intensity:.2f} "
-                f"backends={list(region.backend_viability)} layouts={list(region.layout_candidates)} "
-                f"parallel={list(region.parallelizable_with[:5])}"
-            )
-        return "\n".join(lines)
-
-    def _unsupported_summary(self, obs: Observation) -> str:
-        if not obs.unsupported_ops:
-            return "no unsupported operators"
-        return "\n".join(f"- {target}" for target in obs.unsupported_ops)
-
-    def _pack_summary(self, obs: Observation) -> str:
-        if not obs.active_packs:
-            return "no active extension packs"
-        lines = [
-            f"active={list(obs.active_packs)}",
-            f"sealed_surfaces={list(obs.sealed_surfaces[:12])}",
-            f"generation_apertures={list(obs.generation_apertures[:12])}",
-            f"available_profilers={list(obs.available_profilers[:12])}",
-            f"benchmark_targets={list(obs.pack_benchmark_targets[:12])}",
-        ]
-        return "\n".join(lines)
-
-    def _integration_branch_summary(self, obs: Observation) -> str:
-        return obs.integration_branch or "no integration branch"
-
-    def _frontier_summary(self, obs: Observation, history: list[IterationRecord]) -> str:
-        last_action = history[-1].action_type if history else "none"
-        return (
-            f"step={obs.step_count} budget_remaining={obs.budget_remaining}\n"
-            f"best_latency_us={obs.best_latency_us:.3f}\n"
-            f"current_latency_us={obs.estimated_total_latency_us:.3f}\n"
-            f"last_action={last_action}"
-        )
-
-    def _verification_summary(self, obs: Observation) -> str:
-        if obs.verification is None:
-            return "verification unavailable"
-        summary = (
-            f"tv_passed={obs.verification.tv_passed} "
-            f"tv_failed={obs.verification.tv_failed} "
-            f"tv_pending={obs.verification.tv_pending}"
-        )
-        if obs.verification.last_failure_region:
-            summary += (
-                f"\nlast_failure={obs.verification.last_failure_region}: "
-                f"{obs.verification.last_counterexample_summary}"
-            )
-        return summary
-
-    def _legal_actions_summary(self, legal_actions: list[Any]) -> str:
-        entries = []
-        for item in legal_actions[:12]:
-            delta = f"{item.estimated_cost_delta_us:+.2f}us"
-            entries.append(f"{item.rank}. {item.action.action_type} {item.action.region_id} {delta} [{item.risk}]")
-        return "\n".join(entries) or "(none)"
-
-    def _kernel_contracts(self, obs: Observation) -> list[str]:
-        dossier = obs.analysis_dossier
-        if dossier is None:
-            return []
-        contracts: list[str] = []
-        for region in dossier.regions[:12]:
-            contracts.append(
-                f"{region.region_id}: backends={','.join(region.backend_viability)} "
-                f"layouts={','.join(region.layout_candidates)} "
-                f"local_mem_fit={region.local_memory_fit}"
-            )
-        return contracts
-
-    def _backend_viability_summary(self, obs: Observation) -> list[str]:
-        dossier = obs.analysis_dossier
-        if dossier is None:
-            return []
-        seen: list[str] = []
-        for region in dossier.regions:
-            for backend in region.backend_viability:
-                if backend not in seen:
-                    seen.append(backend)
-        return seen
-
-    def _prior_attempts(self, history: list[IterationRecord]) -> list[str]:
-        return [
-            f"iter={record.iteration} action={record.action_type} target={record.target} "
-            f"improvement={record.improvement_pct:+.2f}% applied={record.applied}"
-            for record in history[-8:]
-        ]
-
-    def _evidence_json(self, obs: Observation, legal_actions: list[Any]) -> str:
-        payload = observation_to_dict(obs)
-        payload["legal_actions"] = legal_actions_to_dict(legal_actions[:20])
-        return json.dumps(payload, sort_keys=True)
-
     # ------------------------------------------------------------------
     # Phase 2: Runtime orchestration
     # ------------------------------------------------------------------
@@ -1306,7 +1128,7 @@ class AgenticCompilationLoop:
             legal_actions = self.env.legal_actions(max_actions=12)
             request = GenerationRequest(
                 prompt_template=prompt,
-                context=self._build_prompt_context(obs, target, legal_actions),
+                context=prompts.build_prompt_context(obs, target, legal_actions),
                 config=self._llm_config(temperature=0.2, max_tokens=1200),
             )
             response = self.llm_client.generate(request)
@@ -1343,7 +1165,7 @@ class AgenticCompilationLoop:
             legal_actions = self.env.legal_actions(max_actions=12)
             request = GenerationRequest(
                 prompt_template=prompt,
-                context=self._build_prompt_context(obs, target, legal_actions),
+                context=prompts.build_prompt_context(obs, target, legal_actions),
                 config=self._llm_config(temperature=0.2, max_tokens=1200),
             )
             response = self.llm_client.generate(request)
@@ -1427,7 +1249,7 @@ class AgenticCompilationLoop:
             legal_actions = self.env.legal_actions(max_actions=12)
             request = GenerationRequest(
                 prompt_template=prompt,
-                context=self._build_prompt_context(obs, target, legal_actions),
+                context=prompts.build_prompt_context(obs, target, legal_actions),
                 config=self._llm_config(temperature=0.2, max_tokens=1200),
             )
             response = self.llm_client.generate(request)
@@ -1497,7 +1319,7 @@ class AgenticCompilationLoop:
             legal_actions = self.env.legal_actions(max_actions=12)
             request = GenerationRequest(
                 prompt_template=prompt,
-                context=self._build_prompt_context(obs, target, legal_actions),
+                context=prompts.build_prompt_context(obs, target, legal_actions),
                 config=self._llm_config(temperature=0.3, max_tokens=1200),
             )
             response = self.llm_client.generate(request)

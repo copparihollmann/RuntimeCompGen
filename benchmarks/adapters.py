@@ -383,7 +383,7 @@ class CompGenAdapter:
                 llm_backend = str((__import__("os")).environ.get("COMPGEN_LLM_BACKEND", "")).strip()
 
             if llm_backend:
-                from compgen.agent.compilation_loop import AgenticCompilationLoop
+                from compgen.agent.loop import AgenticCompilationLoop
                 from compgen.agent.env import CompilerEnv
                 from compgen.llm.config import build_llm_runtime, resolve_llm_selection
 
