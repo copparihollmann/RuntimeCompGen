@@ -821,7 +821,7 @@ def main() -> None:
         )
 
         # Run the agentic compilation loop with MockLLMClient
-        from compgen.agent.compilation_loop import AgenticCompilationLoop
+        from compgen.agent.loop import AgenticCompilationLoop
         from compgen.agent.env import CompilerEnv
         from compgen.llm.mock_client import MockLLMClient
 

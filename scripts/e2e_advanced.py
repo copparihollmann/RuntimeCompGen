@@ -526,7 +526,7 @@ def main() -> None:
         api_key = resolve_api_key("GOOGLE_API_KEY", "GEMINI_API_KEY", "GEMMINI_API")
 
         if api_key:
-            from compgen.agent.compilation_loop import AgenticCompilationLoop
+            from compgen.agent.loop import AgenticCompilationLoop
             from compgen.agent.env import CompilerEnv
             from compgen.llm.gemini_client import GeminiClient
 
