@@ -253,7 +253,7 @@ def run_exp1(models: list[str], target_path: str, out: Path, errors: dict[str, l
 def run_exp2(models: list[str], num_iter: int, out: Path, errors: dict[str, list[str]]) -> list[Any]:
     """CPU/GPU benchmarks + numeric verification."""
     from compgen.runtime.local_executor import LocalExecutor
-    from compgen.verify.harness import verify_callable_against_reference
+    from compgen.semantic.verify.harness import verify_callable_against_reference
 
     executor = LocalExecutor()
     has_gpu = torch.cuda.is_available()

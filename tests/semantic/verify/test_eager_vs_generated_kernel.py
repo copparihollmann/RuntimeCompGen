@@ -11,9 +11,9 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-from compgen.verify.eager_reference import build_eager_reference
-from compgen.verify.harness import verify_callable_against_reference
-from compgen.verify.transformed_reference import wrap_transformed
+from compgen.semantic.verify.eager_reference import build_eager_reference
+from compgen.semantic.verify.harness import verify_callable_against_reference
+from compgen.semantic.verify.transformed_reference import wrap_transformed
 
 # -- scaling kernel -----------------------------------------------------------
 

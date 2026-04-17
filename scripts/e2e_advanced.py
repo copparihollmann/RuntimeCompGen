@@ -236,7 +236,7 @@ def main() -> None:
     print("GATE 32: GPU numeric verification")
     print("=" * 70)
 
-    from compgen.verify.harness import verify_callable_against_reference
+    from compgen.semantic.verify.harness import verify_callable_against_reference
 
     if torch.cuda.is_available():
         try:
