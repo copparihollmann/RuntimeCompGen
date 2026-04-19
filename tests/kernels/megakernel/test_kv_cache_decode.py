@@ -1,4 +1,4 @@
-"""Phase H real-example regression tests.
+"""KV-cache decode-step megakernel regression tests (prefill + decode pattern).
 
 Adds KV-cache support: a new decode-step megakernel that processes one
 new token at a time using cached K/V from previous steps.  Composed

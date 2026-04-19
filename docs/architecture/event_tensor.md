@@ -1,6 +1,5 @@
 # Event Tensor Compiler (ETC) Integration
 
-> Status: **Phase A + B + C + D + E + F + G + H + I + J complete**.
 > Static- and dynamic-scheduled persistent megakernels validated
 > end-to-end on a local GPU, culminating in **KV-cache-driven greedy
 > generation producing the exact same tokens as ``HF.model.generate()``**
@@ -55,7 +54,7 @@ synchronisation lives on `event.call_device.in_edges` /
 `out_edges`, exactly mirroring the paper's Fig. 3 syntax
 (`call_device(in_edges={E: "i->i"}, ...)`).
 
-## Phase A walkthrough -- from PyTorch to a persistent kernel
+## Static-schedule megakernel: from PyTorch to a persistent kernel
 
 ```text
    PyTorch graph
@@ -104,7 +103,7 @@ synchronisation lives on `event.call_device.in_edges` /
 ```
 
 The end-to-end kill test
-(`tests/kernels/test_megakernel_gemm_rs_kill.py`) executes this entire
+(`tests/kernels/megakernel/test_gemm_rs_kill.py`) executes this entire
 flow on a local GPU and asserts both numerical match and that every
 event counter drained to zero (proving the wait protocol actually
 fires).
@@ -122,7 +121,7 @@ fires).
   is gated on inductor's leftover candidates
   (`estimate_megakernel_candidates()` in `inductor_harvest.py`).
 
-## Phase B walkthrough -- dynamic scheduler + MoE
+## Dynamic-schedule megakernel: MoE + data-dependent routing
 
 Phase B adds the *dynamic-scheduling half* of the paper (Algorithm 2 +
 Section 2.4).  The new emitter
@@ -176,7 +175,7 @@ The dynamic scheduler + the data-dep semantics together let a single
 persistent kernel handle MoE without recompilation as the routing
 distribution changes between requests.
 
-## Phase C walkthrough -- transformer-block fusion + real LLM weights + AOT warmup
+## Transformer-block fusion + real LLM weights + AOT warmup
 
 Phase C composes the heavy LLM stages into a single persistent
 megakernel and validates it on **real Llama-architecture checkpoint
@@ -231,7 +230,7 @@ workload is expected — the AOT advantage compounds with model size and
 underlies the paper's headline 35 s vs 583 s for full Qwen3-32B
 serving.
 
-## Phase D walkthrough -- full Llama decoder layer in one megakernel
+## Full Llama decoder layer in one megakernel
 
 Phase D closes the gap between "transformer-block fragment" and "real
 Llama decoder layer" by adding the operators that round out the layer:
@@ -294,7 +293,7 @@ decoder-layer megakernel on those values.  Numerical match against
 the PyTorch eager reference: **max abs error 1.8e-07** on real
 trained weights.
 
-## Phase E walkthrough -- HF-faithful Llama decoder layer (RoPE + causal)
+## HF-faithful Llama decoder layer: RoPE + causal
 
 Phase E closes the remaining math gap to a real HF
 ``LlamaDecoderLayer.forward()`` by adding the two operators Phase D
@@ -327,7 +326,7 @@ RMSNorm + SwiGLU).  Numerical match: max abs error 1.8e-07 on real
 weights with TinyLlama's actual ``rope_theta=10000.0`` and trained
 RMSNorm scales.
 
-## Phase F walkthrough -- HF parity proof + real GQA
+## HF parity proof + real grouped-query attention
 
 Phase F closes the validation chain to actual HuggingFace code and
 adds Grouped-Query Attention to the megakernel.
@@ -374,7 +373,7 @@ Validated on configurations ``(H=4, N_KV=2, KV_REPEAT=2)`` and
 ``(H=4, N_KV=1, KV_REPEAT=4)`` (TinyLlama-like 4:1 ratio).  Numerical
 match against an HF-faithful GQA reference: max abs error **2.7e-07**.
 
-## Phase G walkthrough -- megakernel as drop-in HF layer + real generation
+## Megakernel as drop-in HF layer + real generation
 
 Phase G demonstrates the strongest "real LLM" claim the test surface
 can make.
@@ -418,7 +417,7 @@ input to that fixed length, and the causal mask makes padded
 positions inert.  Indexing ``logits[real_S - 1]`` selects the next
 token from the last real position.
 
-## Phase H walkthrough -- KV cache + production decode pattern
+## KV-cache + production decode pattern
 
 Phase H delivers the second of the two megakernels a real LLM serving
 stack needs: a **decode-step** megakernel that processes one new token
@@ -580,63 +579,63 @@ hardware can actually run -- without needing the 8× B200 rig.
 | Agent invent-slots   | `tests/agent/invent_slots/test_megakernel_slots.py`            | 8      |
 | Megakernel gate      | `tests/agent/gates/test_megakernel_gate.py`                    | 12     |
 | LLM tools + coverage | `tests/llm/test_tools_megakernel.py`                           | 9      |
-| Provider             | `tests/kernels/test_megakernel_provider.py`                    | 8      |
+| Provider             | `tests/kernels/megakernel/test_provider.py`                    | 8      |
 | Capture-side gating  | `tests/capture/test_megakernel_candidates.py`                  | 7      |
-| Real GPU examples    | `tests/kernels/test_phase_a_real_examples.py` (row-sum, attention, Llama MLP) | 8 |
+| Real GPU examples    | `tests/kernels/megakernel/test_static_schedule.py` (row-sum, attention, Llama MLP) | 8 |
 
 ### Phase B
 
 | Layer                       | Tests                                              | Status |
 | --------------------------- | -------------------------------------------------- | :----: |
-| Real GPU examples           | `tests/kernels/test_phase_b_real_examples.py` (dynamic row-sum, MoE) | 7 |
+| Real GPU examples           | `tests/kernels/megakernel/test_dynamic_schedule.py` (dynamic row-sum, MoE) | 7 |
 
 ### Phase C
 
 | Layer                       | Tests                                                                                  | Status |
 | --------------------------- | -------------------------------------------------------------------------------------- | :----: |
-| Real GPU examples           | `tests/kernels/test_phase_c_real_examples.py` (transformer block, real TinyLlama, AOT) | 5      |
+| Real GPU examples           | `tests/kernels/megakernel/test_transformer_block.py` (transformer block, real TinyLlama, AOT) | 5      |
 
 ### Phase D
 
 | Layer                       | Tests                                                                                  | Status |
 | --------------------------- | -------------------------------------------------------------------------------------- | :----: |
-| Real GPU examples           | `tests/kernels/test_phase_d_real_examples.py` (full Llama decoder layer, real TinyLlama checkpoint) | 4      |
+| Real GPU examples           | `tests/kernels/megakernel/test_llama_decoder_layer.py` (full Llama decoder layer, real TinyLlama checkpoint) | 4      |
 
 ### Phase E
 
 | Layer                       | Tests                                                                                  | Status |
 | --------------------------- | -------------------------------------------------------------------------------------- | :----: |
-| Real GPU examples           | `tests/kernels/test_phase_e_real_examples.py` (HF-faithful Llama layer w/ RoPE + causal, real TinyLlama checkpoint) | 5 |
+| Real GPU examples           | `tests/kernels/megakernel/test_rope_and_causal.py` (HF-faithful Llama layer w/ RoPE + causal, real TinyLlama checkpoint) | 5 |
 
 ### Phase F
 
 | Layer                       | Tests                                                                                  | Status |
 | --------------------------- | -------------------------------------------------------------------------------------- | :----: |
-| Real GPU examples           | `tests/kernels/test_phase_f_real_examples.py` (reference vs actual HF.LlamaDecoderLayer.forward, GQA megakernel) | 4 |
+| Real GPU examples           | `tests/kernels/megakernel/test_grouped_query_attention.py` (reference vs actual HF.LlamaDecoderLayer.forward, GQA megakernel) | 4 |
 
 ### Phase G
 
 | Layer                       | Tests                                                                                  | Status |
 | --------------------------- | -------------------------------------------------------------------------------------- | :----: |
-| Real GPU examples           | `tests/kernels/test_phase_g_real_examples.py` (megakernel as drop-in HF layer, greedy generation matches HF.generate) | 3 |
+| Real GPU examples           | `tests/kernels/megakernel/test_llama_end_to_end.py` (megakernel as drop-in HF layer, greedy generation matches HF.generate) | 3 |
 
 ### Phase H
 
 | Layer                       | Tests                                                                                  | Status |
 | --------------------------- | -------------------------------------------------------------------------------------- | :----: |
-| Real GPU examples           | `tests/kernels/test_phase_h_real_examples.py` (decode-step megakernel + KV cache, prefill+decode generation matches HF.generate) | 3 |
+| Real GPU examples           | `tests/kernels/megakernel/test_kv_cache_decode.py` (decode-step megakernel + KV cache, prefill+decode generation matches HF.generate) | 3 |
 
 ### Phase I
 
 | Layer                       | Tests                                                                                  | Status |
 | --------------------------- | -------------------------------------------------------------------------------------- | :----: |
-| Real GPU examples           | `tests/kernels/test_phase_i_real_examples.py` (tiled-matmul layer megakernel, real TinyLlama at HALF-TinyLlama dims) | 3 |
+| Real GPU examples           | `tests/kernels/megakernel/test_tiled_half_dims.py` (tiled-matmul layer megakernel, real TinyLlama at HALF-TinyLlama dims) | 3 |
 
 ### Phase J
 
 | Layer                       | Tests                                                                                  | Status |
 | --------------------------- | -------------------------------------------------------------------------------------- | :----: |
-| Real GPU examples (slow)    | `tests/kernels/test_phase_j_real_examples.py` (tiled megakernel on real TinyLlama at 73% of actual intermediate dim; ~100 s Triton JIT) | 1 |
+| Real GPU examples (slow)    | `tests/kernels/megakernel/test_tiled_full_dims.py` (tiled megakernel on real TinyLlama at 73% of actual intermediate dim; ~100 s Triton JIT) | 1 |
 
 All tests pass on a local TITAN RTX with `triton==3.6.0`,
 `torch==2.10.0+cu128`.

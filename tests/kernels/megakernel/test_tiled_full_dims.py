@@ -1,4 +1,4 @@
-"""Phase J real-example regression tests.
+"""Tiled megakernel regression tests at full TinyLlama intermediate dims.
 
 Validates the tiled megakernel at the largest TinyLlama-derived config
 we can currently fit: H=16, hidden=1024, intermediate=4096 (73% of

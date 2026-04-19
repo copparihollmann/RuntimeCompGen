@@ -1,6 +1,6 @@
-"""Phase B real-example regression tests.
+"""Dynamic-schedule megakernel regression tests (dynamic row-sum, MoE).
 
-Like ``test_phase_a_real_examples.py``, every test in this file
+Like ``test_static_schedule.py``, every test in this file
 executes the **actually-emitted** persistent megakernel produced by
 :func:`compgen.ir.tile.lower_megakernel_dynamic.lower_megakernel_dynamic`
 on a real GPU and compares to a trustworthy PyTorch reference.  No

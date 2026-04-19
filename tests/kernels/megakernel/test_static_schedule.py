@@ -1,4 +1,4 @@
-"""Phase A real-example regression tests.
+"""Static-schedule megakernel regression tests (row-sum, attention, Llama MLP).
 
 These tests execute the **actually-emitted** persistent megakernels --
 no hand-written Triton, no protocol stubs.  Each example builds the

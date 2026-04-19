@@ -1,4 +1,4 @@
-"""Phase F real-example regression tests.
+"""Grouped-query-attention (GQA) megakernel regression tests + HF parity proof.
 
 Closes the validation chain to actual HuggingFace ``LlamaDecoderLayer.forward()``:
 

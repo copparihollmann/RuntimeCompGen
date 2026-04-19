@@ -43,7 +43,7 @@ example took, and lets us focus the Phase C demonstration on stage
 Validated against a PyTorch eager reference that runs the same
 mathematical sequence with ``F.scaled_dot_product_attention`` and a
 SwiGLU MLP.  Real HF model weights are tested in
-``tests/kernels/test_phase_c_real_examples.py``.
+``tests/kernels/megakernel/test_transformer_block.py``.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Phase G real-example regression tests.
+"""End-to-end Llama megakernel regression tests (drop-in HF layer + greedy generation).
 
 End-to-end demonstration that the emitted megakernel is a drop-in
 replacement for HuggingFace's ``LlamaDecoderLayer.forward()`` inside

@@ -1,4 +1,4 @@
-"""Phase I real-example regression tests.
+"""Tiled megakernel regression tests at half-TinyLlama dims.
 
 Validates the tiled-matmul layer megakernel at dims that overflow the
 Phase F shared-memory budget, including running on REAL TinyLlama-1.1B
