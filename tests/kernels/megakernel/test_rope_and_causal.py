@@ -1,4 +1,4 @@
-"""Phase E real-example regression tests.
+"""HF-faithful Llama decoder layer (RoPE + causal) megakernel regression tests.
 
 Adds the operators that turn the Phase D Llama decoder layer into an
 HF-faithful one: RoPE (half-rotation, matching HF's

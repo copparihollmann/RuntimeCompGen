@@ -16,7 +16,7 @@ into an actual Llama / Gemma / Qwen3 decoder layer:
 Eight device-function bodies, seven event tensors, all fused into
 one persistent dynamic-scheduled megakernel.  Computes the *exact*
 mathematical sequence a Llama decoder layer runs (modulo RoPE; the
-test in ``tests/kernels/test_phase_d_real_examples.py`` either skips
+test in ``tests/kernels/megakernel/test_llama_decoder_layer.py`` either skips
 RoPE or applies a no-op rotation, with the same choice made by the
 PyTorch reference for an apples-to-apples comparison).
 

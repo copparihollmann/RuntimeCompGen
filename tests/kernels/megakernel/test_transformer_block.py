@@ -1,4 +1,4 @@
-"""Phase C real-example regression tests.
+"""Transformer-block megakernel regression tests (real TinyLlama weights + AOT warmup).
 
 Every test here executes the **actually-emitted** persistent megakernel
 on a real GPU.  No stubs, no toys, no hand-written parallel kernels.

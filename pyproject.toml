@@ -124,7 +124,7 @@ addopts = [
     # Individual known-flaky test ids.
     "--deselect=tests/agent/invent_slots/test_registrar.py::test_registrar_registers_all_slots",
     "--deselect=tests/agent/policies/test_default.py::test_policy_against_real_registry",
-    "--deselect=tests/kernels/test_phase_d_real_examples.py::test_tinyllama_layernorm_scales_are_loaded_from_real_checkpoint",
+    "--deselect=tests/kernels/megakernel/test_llama_decoder_layer.py::test_tinyllama_layernorm_scales_are_loaded_from_real_checkpoint",
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
