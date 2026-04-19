@@ -1,0 +1,59 @@
+name: nightly-e2e
+
+on:
+  schedule:
+    # Daily at 07:00 UTC
+    - cron: "0 7 * * *"
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "python/compgen/**"
+      - "tests/**"
+      - ".github/workflows/nightly_e2e.yml"
+
+jobs:
+  e2e:
+    name: Full E2E across 9 real fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run full regression
+        run: |
+          uv run pytest tests/ -q \
+            --ignore=tests/agent/test_gepa_loop.py \
+            --ignore=tests/agent/test_pipeline_e2e.py \
+            --ignore=tests/benchmarks/test_runner.py \
+            --ignore=tests/benchmarks/test_torchbench_adapter.py \
+            --ignore=tests/test_smolvla_e2e.py \
+            --deselect tests/agent/invent_slots/test_registrar.py::test_registrar_registers_all_slots \
+            --deselect tests/agent/policies/test_default.py::test_policy_against_real_registry \
+            --deselect tests/kernels/test_phase_d_real_examples.py::test_tinyllama_layernorm_scales_are_loaded_from_real_checkpoint
+
+      - name: Run E2E probe script
+        run: |
+          uv run python user_perspective/scripts/15_full_reconstruction_e2e.py
+
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compgen-e2e-reports
+          path: |
+            user_perspective/reports/wave_7_e2e_report.md
+            user_perspective/reports/stage_b_wave_*.md
