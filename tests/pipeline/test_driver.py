@@ -1,4 +1,4 @@
-"""Tests for the Wave 7 pipeline driver."""
+"""Tests for the pipeline driver."""
 
 from __future__ import annotations
 
@@ -117,7 +117,7 @@ def test_every_stage_is_reported_once():
         options=cuda_a100_defaults(),
     )
     names = [r.name for r in result.stage_reports]
-    # Expect ≥ 24 entries (bridge + 22 passes + 1 plan_validate is optional).
+    # Expect ≥ 23 entries (bridge + the pass suite + an optional plan-validate).
     assert len(names) >= 23
     # Every pass name is unique.
     dup = [n for n in set(names) if names.count(n) > 1]
@@ -165,18 +165,18 @@ def test_result_stages_run_and_stages_skipped_sum_matches():
     assert result.stages_run + result.stages_skipped == len(result.stage_reports)
 
 
-def test_stage_report_has_wave_annotation():
+def test_stage_report_has_group_annotation():
     fx = attention_mlp_tiny()
     result = compile_through_pipeline(
         fx.model,
         fx.example_inputs,
         options=cuda_a100_defaults(),
     )
-    waves = {r.wave for r in result.stage_reports}
-    assert waves.issubset({0, 1, 2, 3, 4, 5, 6})
+    groups = {r.group for r in result.stage_reports}
+    assert groups.issubset({0, 1, 2, 3, 4, 5, 6})
 
 
-# --- execution plan quality after Wave 6 ----------------------------------
+# --- execution plan quality after runtime passes --------------------------
 
 
 def test_cuda_a100_assigns_memory_space_to_all_buffers():
