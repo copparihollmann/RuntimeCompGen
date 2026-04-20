@@ -1,4 +1,4 @@
-""" acceptance — real Gemma-2B through ``compile_with_llm``.
+"""acceptance — real Gemma-2B through ``compile_with_llm``.
 
 Skip-gated by ``transformers`` import + HF hub cache presence.
 """
@@ -30,9 +30,7 @@ pytestmark = [
 def test_real_gemma2b_compiles_end_to_end() -> None:
     result = run_gemma2b_compile(seq_len=4, budget=2)
     assert result.compiled is not None
-    assert result.compiled.pipeline_result.passed, (
-        "pipeline gate did not pass on real Gemma-2B"
-    )
+    assert result.compiled.pipeline_result.passed, "pipeline gate did not pass on real Gemma-2B"
 
 
 def test_real_gemma2b_preserves_model_identity() -> None:

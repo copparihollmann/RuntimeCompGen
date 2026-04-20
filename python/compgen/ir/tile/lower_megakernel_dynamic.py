@@ -215,9 +215,7 @@ def _gather_tasks(
                     if hasattr(c, "event_ref"):
                         idx = _coord_index(c)
                         if idx is None:
-                            raise ValueError(
-                                " dynamic scheduler MVP only supports literal integer event coords."
-                            )
+                            raise ValueError(" dynamic scheduler MVP only supports literal integer event coords.")
                         out.append([(c.event_ref.data, idx)])
                     else:
                         out.append([])
@@ -228,9 +226,7 @@ def _gather_tasks(
                     if hasattr(c, "event_ref"):
                         idx = _coord_index(c)
                         if idx is None:
-                            raise ValueError(
-                                " dynamic scheduler MVP only supports literal integer event coords."
-                            )
+                            raise ValueError(" dynamic scheduler MVP only supports literal integer event coords.")
                         shared.append((c.event_ref.data, idx))
                 return [list(shared) for _ in range(n_tasks)]
 

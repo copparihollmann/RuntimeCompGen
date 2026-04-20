@@ -1,4 +1,4 @@
-""" acceptance — real SmolVLA through ``compile_with_llm``.
+"""acceptance — real SmolVLA through ``compile_with_llm``.
 
 Skip-gated by ``transformers`` + ``lerobot`` imports + HF hub cache.
 """
@@ -32,6 +32,4 @@ pytestmark = [
 def test_real_smolvla_compiles_end_to_end() -> None:
     result = run_smolvla_compile(budget=2)
     assert result.compiled is not None
-    assert result.compiled.pipeline_result.passed, (
-        "pipeline gate did not pass on real SmolVLA"
-    )
+    assert result.compiled.pipeline_result.passed, "pipeline gate did not pass on real SmolVLA"
