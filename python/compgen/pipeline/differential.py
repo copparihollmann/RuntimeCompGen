@@ -179,10 +179,7 @@ def compile_and_diff(
     report.opaque_count = opaque
     report.total_ops = total
     if report.opaque_rate > opaque_rate_threshold:
-        report.warnings.append(
-            f"opaque rate {report.opaque_rate:.3f} exceeds threshold "
-            f"{opaque_rate_threshold}"
-        )
+        report.warnings.append(f"opaque rate {report.opaque_rate:.3f} exceeds threshold {opaque_rate_threshold}")
 
     # --- 5. Eager diff ------------------------------------------------
     if example_inputs is not None:
@@ -204,8 +201,7 @@ def compile_and_diff(
                 report.eager_diff_max_abs = diff
                 if diff > atol + rtol * ref.abs().max().item():
                     report.failures.append(
-                        f"eager vs reference diff {diff:.6f} exceeds tolerance "
-                        f"({atol} + {rtol} * max_abs)"
+                        f"eager vs reference diff {diff:.6f} exceeds tolerance ({atol} + {rtol} * max_abs)"
                     )
                     report.eager_diff_pass = False
                     report.passed = False
@@ -216,6 +212,7 @@ def compile_and_diff(
     if run_compiled_executor and example_inputs is not None and eager_reference is not None:
         try:
             import torch
+
             from compgen.runtime.cpu_executor import ExecutorStats, execute
 
             ep = exported_program
@@ -244,13 +241,10 @@ def compile_and_diff(
                         tol = atol + rtol * eager_reference.abs().max().item()
                         report.compiled_diff_pass = diff == diff and diff <= tol  # nan-safe
                         if not report.compiled_diff_pass:
-                            report.warnings.append(
-                                f"compiled vs eager diff {diff:.6f} > tol {tol:.6f}"
-                            )
+                            report.warnings.append(f"compiled vs eager diff {diff:.6f} > tol {tol:.6f}")
                     else:
                         report.warnings.append(
-                            f"compiled output shape {tuple(out.shape)} != "
-                            f"eager {tuple(eager_reference.shape)}"
+                            f"compiled output shape {tuple(out.shape)} != eager {tuple(eager_reference.shape)}"
                         )
         except Exception as exc:  # noqa: BLE001
             report.warnings.append(f"compiled executor failed: {exc}")

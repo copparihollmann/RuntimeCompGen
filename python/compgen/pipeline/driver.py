@@ -141,6 +141,7 @@ def _import_passes() -> dict[str, Any]:
         NumericsPolicy,
         run_set_numerics_policy,
     )
+
     return {
         "run_alias_io_buffers": run_alias_io_buffers,
         "AssignMemorySpaceConfig": AssignMemorySpaceConfig,
@@ -294,9 +295,7 @@ def _run_with_report(
         return PipelineStageReport(name=name, wave=wave, stats=stats)
     except Exception as exc:  # noqa: BLE001
         log.warning(f"pipeline.{name}.failed", error=str(exc))
-        return PipelineStageReport(
-            name=name, wave=wave, skipped=True, skipped_reason=f"error: {exc}"
-        )
+        return PipelineStageReport(name=name, wave=wave, skipped=True, skipped_reason=f"error: {exc}")
 
 
 def compile_through_pipeline(
@@ -326,6 +325,7 @@ def compile_through_pipeline(
     if hasattr(model_or_exported, "graph") and example_inputs is None:
         # Already an ExportedProgram; its .graph_module is the bridge input.
         from compgen.ir.payload.import_fx import FXImporter
+
         importer = FXImporter()
         module = importer.import_graph(model_or_exported)
         bridge_path = "fx_importer"
@@ -342,8 +342,10 @@ def compile_through_pipeline(
                 bridge_path=bridge_path,
                 stage_reports=[
                     PipelineStageReport(
-                        name="bridge_fx_graph", wave=0,
-                        skipped=True, skipped_reason="bridge failed",
+                        name="bridge_fx_graph",
+                        wave=0,
+                        skipped=True,
+                        skipped_reason="bridge failed",
                     )
                 ],
                 options=options,
@@ -354,141 +356,249 @@ def compile_through_pipeline(
     ]
 
     # --- Wave 1: structural / numerics ------------------------------------
-    reports.append(_run_with_report(
-        passes, "run_decompose_concat", 1,
-        options.enable_decompose_concat, "decompose_concat",
-        args=(module,),
-    ))
-    reports.append(_run_with_report(
-        passes, "run_fold_transposes_into_dots", 1,
-        options.enable_fold_transposes_into_dots, "fold_transposes_into_dots",
-        args=(module,),
-    ))
+    reports.append(
+        _run_with_report(
+            passes,
+            "run_decompose_concat",
+            1,
+            options.enable_decompose_concat,
+            "decompose_concat",
+            args=(module,),
+        )
+    )
+    reports.append(
+        _run_with_report(
+            passes,
+            "run_fold_transposes_into_dots",
+            1,
+            options.enable_fold_transposes_into_dots,
+            "fold_transposes_into_dots",
+            args=(module,),
+        )
+    )
     if options.enable_demote_contraction_inputs:
         from xdsl.dialects.builtin import BFloat16Type, Float16Type
+
         target_t = BFloat16Type() if options.demote_target_type == "bf16" else Float16Type()
         cfg = passes["DemoteContractionInputsConfig"](target_type=target_t)
-        reports.append(_run_with_report(
-            passes, "run_demote_contraction_inputs", 1, True,
-            "demote_contraction_inputs",
-            args=(module,),
-            kwargs={"config": cfg},
-        ))
+        reports.append(
+            _run_with_report(
+                passes,
+                "run_demote_contraction_inputs",
+                1,
+                True,
+                "demote_contraction_inputs",
+                args=(module,),
+                kwargs={"config": cfg},
+            )
+        )
     else:
-        reports.append(PipelineStageReport(
-            name="demote_contraction_inputs", wave=1, skipped=True,
-            skipped_reason="disabled",
-        ))
-    reports.append(_run_with_report(
-        passes, "run_set_numerics_policy", 1,
-        options.enable_set_numerics_policy, "set_numerics_policy",
-        args=(module,),
-    ))
+        reports.append(
+            PipelineStageReport(
+                name="demote_contraction_inputs",
+                wave=1,
+                skipped=True,
+                skipped_reason="disabled",
+            )
+        )
+    reports.append(
+        _run_with_report(
+            passes,
+            "run_set_numerics_policy",
+            1,
+            options.enable_set_numerics_policy,
+            "set_numerics_policy",
+            args=(module,),
+        )
+    )
 
     # --- Wave 2: semantic detection ---------------------------------------
-    reports.append(_run_with_report(
-        passes, "run_raise_special_ops", 2,
-        options.enable_raise_special_ops, "raise_special_ops",
-        args=(module,),
-    ))
+    reports.append(
+        _run_with_report(
+            passes,
+            "run_raise_special_ops",
+            2,
+            options.enable_raise_special_ops,
+            "raise_special_ops",
+            args=(module,),
+        )
+    )
     if options.enable_fuse_softmax_to_triton:
         cfg = passes["FuseSoftmaxToTritonConfig"](
             kernel_family_allowlist=options.kernel_family_allowlist,
         )
-        reports.append(_run_with_report(
-            passes, "run_fuse_softmax_to_triton", 2, True,
-            "fuse_softmax_to_triton",
-            args=(module,),
-            kwargs={"config": cfg},
-        ))
+        reports.append(
+            _run_with_report(
+                passes,
+                "run_fuse_softmax_to_triton",
+                2,
+                True,
+                "fuse_softmax_to_triton",
+                args=(module,),
+                kwargs={"config": cfg},
+            )
+        )
     else:
-        reports.append(PipelineStageReport(
-            name="fuse_softmax_to_triton", wave=2, skipped=True,
-            skipped_reason="disabled",
-        ))
+        reports.append(
+            PipelineStageReport(
+                name="fuse_softmax_to_triton",
+                wave=2,
+                skipped=True,
+                skipped_reason="disabled",
+            )
+        )
 
     # --- Wave 3: layout / reduction ---------------------------------------
     if options.enable_propagate_transposes:
         cfg = passes["PropagateTransposesConfig"](
             aggressiveness=options.transpose_aggressiveness,
         )
-        reports.append(_run_with_report(
-            passes, "run_propagate_transposes", 3, True,
-            "propagate_transposes",
-            args=(module,),
-            kwargs={"config": cfg},
-        ))
+        reports.append(
+            _run_with_report(
+                passes,
+                "run_propagate_transposes",
+                3,
+                True,
+                "propagate_transposes",
+                args=(module,),
+                kwargs={"config": cfg},
+            )
+        )
     else:
-        reports.append(PipelineStageReport(
-            name="propagate_transposes", wave=3, skipped=True,
-            skipped_reason="disabled",
-        ))
+        reports.append(
+            PipelineStageReport(
+                name="propagate_transposes",
+                wave=3,
+                skipped=True,
+                skipped_reason="disabled",
+            )
+        )
     if options.enable_plan_reduction:
         cfg = passes["PlanReductionConfig"](policy=options.reduction_policy)
-        reports.append(_run_with_report(
-            passes, "run_plan_reduction", 3, True, "plan_reduction",
-            args=(module,), kwargs={"config": cfg},
-        ))
+        reports.append(
+            _run_with_report(
+                passes,
+                "run_plan_reduction",
+                3,
+                True,
+                "plan_reduction",
+                args=(module,),
+                kwargs={"config": cfg},
+            )
+        )
     else:
-        reports.append(PipelineStageReport(
-            name="plan_reduction", wave=3, skipped=True, skipped_reason="disabled",
-        ))
+        reports.append(
+            PipelineStageReport(
+                name="plan_reduction",
+                wave=3,
+                skipped=True,
+                skipped_reason="disabled",
+            )
+        )
 
     # --- Wave 4: quantization ---------------------------------------------
     if options.enable_lower_quantized_matmul:
         cfg = passes["LowerQuantizedMatmulConfig"](policy=options.quantized_matmul_policy)
-        reports.append(_run_with_report(
-            passes, "run_lower_quantized_matmul", 4, True,
-            "lower_quantized_matmul",
-            args=(module,), kwargs={"config": cfg},
-        ))
+        reports.append(
+            _run_with_report(
+                passes,
+                "run_lower_quantized_matmul",
+                4,
+                True,
+                "lower_quantized_matmul",
+                args=(module,),
+                kwargs={"config": cfg},
+            )
+        )
     else:
-        reports.append(PipelineStageReport(
-            name="lower_quantized_matmul", wave=4, skipped=True, skipped_reason="disabled",
-        ))
-    reports.append(_run_with_report(
-        passes, "run_lower_quantized_conv", 4,
-        options.enable_lower_quantized_conv, "lower_quantized_conv",
-        args=(module,),
-    ))
+        reports.append(
+            PipelineStageReport(
+                name="lower_quantized_matmul",
+                wave=4,
+                skipped=True,
+                skipped_reason="disabled",
+            )
+        )
+    reports.append(
+        _run_with_report(
+            passes,
+            "run_lower_quantized_conv",
+            4,
+            options.enable_lower_quantized_conv,
+            "lower_quantized_conv",
+            args=(module,),
+        )
+    )
     if options.enable_fuse_dequant_matmul:
         cfg = passes["FuseDequantMatmulConfig"](
             reassoc_safe_only=options.fuse_dequant_reassoc_safe,
         )
-        reports.append(_run_with_report(
-            passes, "run_fuse_dequant_matmul", 4, True,
-            "fuse_dequant_matmul",
-            args=(module,), kwargs={"config": cfg},
-        ))
+        reports.append(
+            _run_with_report(
+                passes,
+                "run_fuse_dequant_matmul",
+                4,
+                True,
+                "fuse_dequant_matmul",
+                args=(module,),
+                kwargs={"config": cfg},
+            )
+        )
     else:
-        reports.append(PipelineStageReport(
-            name="fuse_dequant_matmul", wave=4, skipped=True, skipped_reason="disabled",
-        ))
-    reports.append(_run_with_report(
-        passes, "run_normalize_subbyte", 4,
-        options.enable_normalize_subbyte, "normalize_subbyte",
-        args=(module,),
-    ))
+        reports.append(
+            PipelineStageReport(
+                name="fuse_dequant_matmul",
+                wave=4,
+                skipped=True,
+                skipped_reason="disabled",
+            )
+        )
+    reports.append(
+        _run_with_report(
+            passes,
+            "run_normalize_subbyte",
+            4,
+            options.enable_normalize_subbyte,
+            "normalize_subbyte",
+            args=(module,),
+        )
+    )
 
     # --- Wave 5: large structural -----------------------------------------
-    reports.append(_run_with_report(
-        passes, "run_lower_conv_to_img2col", 5,
-        options.enable_lower_conv_to_img2col, "lower_conv_to_img2col",
-        args=(module,),
-    ))
+    reports.append(
+        _run_with_report(
+            passes,
+            "run_lower_conv_to_img2col",
+            5,
+            options.enable_lower_conv_to_img2col,
+            "lower_conv_to_img2col",
+            args=(module,),
+        )
+    )
     if options.enable_match_library_call:
         cfg = passes["MatchLibraryCallConfig"](
             library_allowlist=tuple(options.library_allowlist),
         )
-        reports.append(_run_with_report(
-            passes, "run_match_library_call", 5, True,
-            "match_library_call",
-            args=(module,), kwargs={"config": cfg},
-        ))
+        reports.append(
+            _run_with_report(
+                passes,
+                "run_match_library_call",
+                5,
+                True,
+                "match_library_call",
+                args=(module,),
+                kwargs={"config": cfg},
+            )
+        )
     else:
-        reports.append(PipelineStageReport(
-            name="match_library_call", wave=5, skipped=True, skipped_reason="disabled",
-        ))
+        reports.append(
+            PipelineStageReport(
+                name="match_library_call",
+                wave=5,
+                skipped=True,
+                skipped_reason="disabled",
+            )
+        )
 
     # --- Wave 6: Phase 5 runtime ------------------------------------------
     plan = _build_minimal_execution_plan(module, workload_name, target_name)
@@ -498,64 +608,132 @@ def compile_through_pipeline(
             vtcm_bytes=options.vtcm_bytes,
             scratch_memory_space="vtcm" if options.vtcm_bytes > 0 else "scratchpad",
         )
-        reports.append(_run_with_report(
-            passes, "run_assign_memory_space", 6, True,
-            "assign_memory_space",
-            args=(plan,), kwargs={"config": cfg},
-        ))
+        reports.append(
+            _run_with_report(
+                passes,
+                "run_assign_memory_space",
+                6,
+                True,
+                "assign_memory_space",
+                args=(plan,),
+                kwargs={"config": cfg},
+            )
+        )
     else:
-        reports.append(PipelineStageReport(
-            name="assign_memory_space", wave=6, skipped=True, skipped_reason="disabled",
-        ))
+        reports.append(
+            PipelineStageReport(
+                name="assign_memory_space",
+                wave=6,
+                skipped=True,
+                skipped_reason="disabled",
+            )
+        )
 
-    reports.append(_run_with_report(
-        passes, "run_assign_queue", 6, options.enable_assign_queue,
-        "assign_queue", args=(plan,),
-    ))
-    reports.append(_run_with_report(
-        passes, "run_assign_streams", 6, options.enable_assign_streams,
-        "assign_streams", args=(plan,),
-    ))
-    reports.append(_run_with_report(
-        passes, "run_plan_buffers", 6, options.enable_plan_buffers,
-        "plan_buffers", args=(plan,),
-    ))
-    reports.append(_run_with_report(
-        passes, "run_insert_copies", 6, options.enable_insert_copies,
-        "insert_copies", args=(plan,),
-    ))
-    reports.append(_run_with_report(
-        passes, "run_alias_io_buffers", 6, options.enable_alias_io_buffers,
-        "alias_io_buffers", args=(plan,),
-    ))
+    reports.append(
+        _run_with_report(
+            passes,
+            "run_assign_queue",
+            6,
+            options.enable_assign_queue,
+            "assign_queue",
+            args=(plan,),
+        )
+    )
+    reports.append(
+        _run_with_report(
+            passes,
+            "run_assign_streams",
+            6,
+            options.enable_assign_streams,
+            "assign_streams",
+            args=(plan,),
+        )
+    )
+    reports.append(
+        _run_with_report(
+            passes,
+            "run_plan_buffers",
+            6,
+            options.enable_plan_buffers,
+            "plan_buffers",
+            args=(plan,),
+        )
+    )
+    reports.append(
+        _run_with_report(
+            passes,
+            "run_insert_copies",
+            6,
+            options.enable_insert_copies,
+            "insert_copies",
+            args=(plan,),
+        )
+    )
+    reports.append(
+        _run_with_report(
+            passes,
+            "run_alias_io_buffers",
+            6,
+            options.enable_alias_io_buffers,
+            "alias_io_buffers",
+            args=(plan,),
+        )
+    )
     if options.enable_dma_overlap:
         cfg = passes["DMAOverlapConfig"]()
-        reports.append(_run_with_report(
-            passes, "run_dma_overlap", 6, True, "dma_overlap",
-            args=(plan,), kwargs={"config": cfg},
-        ))
+        reports.append(
+            _run_with_report(
+                passes,
+                "run_dma_overlap",
+                6,
+                True,
+                "dma_overlap",
+                args=(plan,),
+                kwargs={"config": cfg},
+            )
+        )
     else:
-        reports.append(PipelineStageReport(
-            name="dma_overlap", wave=6, skipped=True, skipped_reason="disabled",
-        ))
-    reports.append(_run_with_report(
-        passes, "run_insert_host_offload", 6, options.enable_insert_host_offload,
-        "insert_host_offload", args=(plan,),
-    ))
-    reports.append(_run_with_report(
-        passes, "run_normalize_subbyte_post_layout", 6,
-        options.enable_normalize_subbyte_post_layout,
-        "normalize_subbyte_post_layout", args=(plan,),
-    ))
+        reports.append(
+            PipelineStageReport(
+                name="dma_overlap",
+                wave=6,
+                skipped=True,
+                skipped_reason="disabled",
+            )
+        )
+    reports.append(
+        _run_with_report(
+            passes,
+            "run_insert_host_offload",
+            6,
+            options.enable_insert_host_offload,
+            "insert_host_offload",
+            args=(plan,),
+        )
+    )
+    reports.append(
+        _run_with_report(
+            passes,
+            "run_normalize_subbyte_post_layout",
+            6,
+            options.enable_normalize_subbyte_post_layout,
+            "normalize_subbyte_post_layout",
+            args=(plan,),
+        )
+    )
 
     # Verify plan post-conditions when any Wave 6 pass ran.
     try:
         plan.validate()
     except Exception as exc:  # noqa: BLE001
-        reports.append(PipelineStageReport(
-            name="_plan_validate", wave=6,
-            skipped=True, skipped_reason=f"validate failed: {exc}",
-        ))
+        reports.append(
+            PipelineStageReport(
+                name="_plan_validate",
+                wave=6,
+                skipped=True,
+                skipped_reason=f"validate failed: {exc}",
+            )
+        )
 
     return PipelineResult(
         module=module,
