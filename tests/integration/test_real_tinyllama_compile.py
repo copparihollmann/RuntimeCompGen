@@ -1,4 +1,4 @@
-"""Phase A.1 acceptance — real TinyLlama-1.1B through ``compile_with_llm``.
+""" acceptance — real TinyLlama-1.1B through ``compile_with_llm``.
 
 Skip-gated by:
 
