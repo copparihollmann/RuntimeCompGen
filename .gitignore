@@ -272,6 +272,10 @@ pytest-of-*/
 compgen-test-home-*/
 torchinductor_*/
 
+# Native runtime CMake build directories (out-of-tree per triple)
+runtime/native/libcompgen_rt/build/
+runtime/native/libcompgen_rt/build-*/
+
 # Paper metrics artifacts
 artifacts/paper/
 
