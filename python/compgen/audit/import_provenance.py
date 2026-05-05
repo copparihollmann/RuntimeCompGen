@@ -140,14 +140,21 @@ def compute_provenance(
     forbidden_modules: tuple[str, ...] = DEFAULT_FORBIDDEN_MODULES,
     mock_modules: tuple[str, ...] = DEFAULT_MOCK_MODULES,
 ) -> ImportProvenance:
-    """Diff two snapshots and classify."""
+    """Diff two snapshots and classify.
+
+    Forbidden / mock imports are scored against the *newly-loaded*
+    modules (after − before), not the cumulative ``sys.modules``.
+    A previously-loaded mock that this run did not trigger is not
+    this run's failure — that would make the audit hostage to whatever
+    a prior pytest case happened to import.
+    """
     new_modules = sorted(set(after.modules) - set(before.modules))
     forbidden_imported = [
-        m for m in after.modules
+        m for m in new_modules
         if any(m == f or m.startswith(f + ".") for f in forbidden_modules)
     ]
     mock_imported = [
-        m for m in after.modules
+        m for m in new_modules
         if any(m == f or m.startswith(f + ".") for f in mock_modules)
     ]
     env_overrides = {

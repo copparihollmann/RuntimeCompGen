@@ -297,6 +297,10 @@ allowed_nonproduction_symbols:
     reason: "Bring-up guide explicitly tells users 'compgen scaffold-target is still a stub. For now, use the Python API directly' — this IS the documented current state"
     forbidden_in: []
 
+  - path: docs/reference/realness_policy.md
+    reason: "Operator-facing realness policy doc; quotes the red-team prompt that names the words the audit looks for. Meta-reference, not a residual"
+    forbidden_in: []
+
 # Patterns we tolerate inside any source file (e.g. comment markers in
 # docs / generated stubs / strings). The base scanner already excludes
 # .compgen_cache, .crg-artifacts, results/, __pycache__, .git, and tests/
