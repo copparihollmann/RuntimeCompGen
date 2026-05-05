@@ -24,6 +24,12 @@ SEED_ROOT = REPO_ROOT / "docs" / "generated" / "pass_cards"
 SEED_CARDS = (
     "set_tile_params",
     "fuse_producer_consumer",
+    # M-33: priority-1 ports (XLA / IREE), 5 production passes
+    "fold_transposes_into_dots",
+    "propagate_transposes",
+    "plan_reduction",
+    "lower_quantized_matmul",
+    "fuse_softmax_to_triton",
 )
 
 
@@ -111,7 +117,9 @@ def test_emitted_request_pass_cards_match_registry(tmp_path: Path) -> None:
     assert a == b
 
 
-def test_iter_seed_cards_returns_two() -> None:
+def test_iter_seed_cards_returns_full_set() -> None:
     cards = list(iter_cards(SEED_ROOT))
-    assert len(cards) == 2
-    assert {c.pass_id for c in cards} == set(SEED_CARDS)
+    assert {c.pass_id for c in cards} == set(SEED_CARDS), (
+        f"expected exactly {sorted(SEED_CARDS)}, got "
+        f"{sorted(c.pass_id for c in cards)}"
+    )

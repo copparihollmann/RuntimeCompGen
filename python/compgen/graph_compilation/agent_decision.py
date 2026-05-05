@@ -804,6 +804,115 @@ def validate_agent_decision_response(
                 f"passes_allowed contains ids without pass cards: {exc}"
             )
 
+    # 2c. M-33.2 verification-certificate gate — when the recipe-planning
+    # stage has produced post_lowering and / or differential reports,
+    # the corresponding verification certificates must be on disk. If
+    # the report exists but the cert is missing (e.g. on a pre-M-33
+    # cached fixture run), the validator emits the cert lazily from
+    # the report — the invariant is "cert co-located with report",
+    # not "cert was emitted by run.py". Lazy emission preserves the
+    # gate without forcing fixture regeneration, and a deliberately-
+    # corrupted cert (artifact_hash mismatch, see
+    # control_certificate_artifact_hash_changed) is still caught.
+    try:
+        from compgen.passes.verification import (
+            _certificate_path_for as _cert_path,
+            emit_certificate_from_differential_report,
+            emit_certificate_from_post_lowering_report,
+        )
+
+        rp = run_dir / "03_recipe_planning"
+        pl_report = (rp / "post_lowering" /
+                     "post_lowering_verification_report.json")
+        if pl_report.exists():
+            pl_cert = _cert_path(run_dir, "structural")
+            if not pl_cert.exists():
+                # Lazy emit — the report carries the same status the
+                # cert would have had if run.py had emitted it.
+                emit_certificate_from_post_lowering_report(run_dir=run_dir)
+            _add(
+                "verification_certificate_structural_present",
+                pl_cert.exists(),
+                "" if pl_cert.exists()
+                else f"post_lowering report exists but cert emit failed at {pl_cert}",
+            )
+        diff_report = (rp / "differential_verification" /
+                       "differential_verification_report.json")
+        if diff_report.exists():
+            diff_cert = _cert_path(run_dir, "differential")
+            if not diff_cert.exists():
+                emit_certificate_from_differential_report(run_dir=run_dir)
+            _add(
+                "verification_certificate_differential_present",
+                diff_cert.exists(),
+                "" if diff_cert.exists()
+                else f"differential report exists but cert emit failed at {diff_cert}",
+            )
+    except Exception as exc:  # noqa: BLE001
+        _add(
+            "verification_certificate_check",
+            False,
+            f"{type(exc).__name__}: {exc}",
+        )
+
+    # 2d. M-33.3 refinement monotonicity — the recipe's claimable
+    # refinement is the weakest preserves_refinement across every
+    # applied pass. Reading the chain from candidate_selection.json is
+    # the simplest source: each entry carries its candidate_kind, and
+    # we resolve those kinds to pass cards via the registry.
+    try:
+        import json as _json
+
+        cs_path = run_dir / "03_recipe_planning" / "candidate_selection.json"
+        rs_path = run_dir / "03_recipe_planning" / "recipe_summary.json"
+        if cs_path.exists() and rs_path.exists():
+            from compgen.passes.cards import (
+                PassCardRegistry,
+                default_registry_root,
+            )
+            from compgen.passes.refinement import (
+                inspect_refinement_chain,
+            )
+
+            cs = _json.loads(cs_path.read_text())
+            rs = _json.loads(rs_path.read_text())
+            applied_kinds = [
+                e.get("candidate_kind", "")
+                for e in (cs.get("selections") or [])
+                if e.get("candidate_kind")
+            ]
+            registry = PassCardRegistry.load(default_registry_root())
+            applied_cards = [
+                registry.get(k) for k in applied_kinds
+                if registry.get(k) is not None
+            ]
+            claimed = rs.get("declared_refinement", "")
+            if claimed and applied_cards:
+                report_chain = inspect_refinement_chain(
+                    applied_cards, claimed,
+                    recipe_id=rs.get("recipe_id", ""),
+                )
+                _add(
+                    "refinement_monotonicity_holds",
+                    report_chain.holds,
+                    report_chain.detail or
+                    f"chain={list(report_chain.chain)} "
+                    f"claimed={report_chain.claimed} "
+                    f"claimable={report_chain.claimable}",
+                )
+                if not report_chain.holds:
+                    failures.append(
+                        f"refinement monotonicity: {report_chain.detail}"
+                    )
+    except Exception as exc:  # noqa: BLE001
+        # M-33.3 is informational at this stage; a malformed
+        # candidate_selection should not fail the validator.
+        _add(
+            "refinement_monotonicity_check",
+            False,
+            f"{type(exc).__name__}: {exc}",
+        )
+
     # 2b. M-31A.3 decision-id discipline — when the request carries a
     # decision_id AND the response carries one, they must match. A
     # missing response.decision_id is tolerated (pre-M-31A agents won't

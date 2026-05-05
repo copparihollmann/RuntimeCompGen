@@ -435,7 +435,13 @@ def _utc_now() -> str:
 
 @dataclass(frozen=True)
 class AnalysisSummary:
-    """One analysis summary as observed in a specific run dir."""
+    """One analysis summary as observed in a specific run dir.
+
+    M-33: ``generation`` tracks how many invalidation events have been
+    recorded against this summary id during the run. Default 0 keeps
+    pre-M-33 callers honest — they observe the same shape, just
+    without monotonic-bump semantics.
+    """
 
     id: str
     level: str
@@ -446,6 +452,7 @@ class AnalysisSummary:
     last_modified_utc: str
     description: str
     optional: bool
+    generation: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -458,6 +465,7 @@ class AnalysisSummary:
             "last_modified_utc": self.last_modified_utc,
             "description": self.description,
             "optional": self.optional,
+            "generation": self.generation,
         }
 
 
@@ -582,4 +590,45 @@ class AnalysisIndex:
             "summary_count": len(self.summaries),
             "available_count": len(self.available_summaries()),
             "summaries": [s.to_dict() for s in self],
+        }
+
+    # ------------------------------------------------------------------ #
+    # M-33: diff against another index
+    # ------------------------------------------------------------------ #
+
+    def diff(self, other: AnalysisIndex) -> dict[str, tuple[str, ...]]:
+        """Diff against ``other`` (typically a later snapshot of the same run).
+
+        Returns a mapping with three keys:
+
+        - ``mutated``  — summary ids whose ``content_hash`` differs and
+                         both indices report the summary as available.
+        - ``appeared`` — summary ids that were unavailable in ``self`` but
+                         are available in ``other``.
+        - ``removed``  — summary ids that were available in ``self`` but
+                         are unavailable in ``other``.
+
+        The full ``InvalidationDiff`` view (ordered tuples per axis) is
+        provided by :func:`compgen.analysis.invalidation.compute_invalidation_diff`;
+        this method is the lower-level primitive.
+        """
+        mutated: list[str] = []
+        appeared: list[str] = []
+        removed: list[str] = []
+        for sid in sorted(self.summaries):
+            before = self.summaries[sid]
+            after = other.summaries.get(sid)
+            if after is None:
+                continue
+            if before.available and after.available:
+                if before.content_hash != after.content_hash:
+                    mutated.append(sid)
+            elif before.available and not after.available:
+                removed.append(sid)
+            elif (not before.available) and after.available:
+                appeared.append(sid)
+        return {
+            "mutated": tuple(mutated),
+            "appeared": tuple(appeared),
+            "removed": tuple(removed),
         }
