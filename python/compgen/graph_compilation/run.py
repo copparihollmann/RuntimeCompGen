@@ -1367,6 +1367,42 @@ def run_graph_compilation(
                 ),
             )
 
+    # M-31A.3: emit a decision trace per finished agent decision. Same
+    # post-manifest position as the M-26 bridge; the trace contains the
+    # request/llm_view/candidate_actions/promotion_library hashes that
+    # let a future replay assert the decision was deterministic.
+    if needs_recipe_planning:
+        try:
+            from compgen.audit.trace_replay import build_trace, write_trace
+
+            request_path = (
+                out_dir / "03_recipe_planning" / "agent_decision"
+                / "agent_decision_request.json"
+            )
+            if request_path.exists():
+                _trace = build_trace(
+                    out_dir,
+                    run_id=run_id,
+                    region_id="",  # request-level trace; per-region traces are M-31's job
+                    decision_index=0,
+                    commit=_git_commit_or_none(repo_root) or "",
+                )
+                write_trace(_trace, run_dir=out_dir)
+                _append_ledger(
+                    ledger_path, stage_id="trust_audit",
+                    event="artifact_written",
+                    note=(
+                        f"agent_decision_trace_0000.json "
+                        f"(decision_id={_trace.decision_id})"
+                    ),
+                )
+        except Exception as exc:  # noqa: BLE001 - best-effort
+            _append_ledger(
+                ledger_path, stage_id="trust_audit",
+                event="artifact_written",
+                note=f"trace_replay error {type(exc).__name__}: {exc}",
+            )
+
     return RunResult(
         run_dir=out_dir,
         manifest_path=manifest_path,
