@@ -207,3 +207,6 @@ views, not authority.
 | **Promoted recipe** | Verified recipe in `.compgen_cache/recipes/` with two-tier cache key, evidence summary, gate level, and `applies_when` predicates (Section 19; see `docs/architecture/promotion-and-memory.md`) |
 | **Region signature** | Pattern-level cache key — SHA256[:16] of (op_family, dtype, layout, abstracted shape, target_class). Two regions share a signature iff their shapes match under `int` / `None` / `{"mod": k}` abstraction |
 | **Promotion gate level** | Six-level evidence ladder: `observed` → `verified_fx` → `verified_kernel` → `characterized` → `promoted` → `portable` (M-29 / `compgen.promotion.gates`) |
+| **Realness contract** | Per-feature YAML claim record at `docs/realness/<feature_id>.yaml` declaring the feature's realness level, forbidden constructs, and required evidence (M-31A; see `compgen.audit.contracts`) |
+| **Realness level** | Six-level claim strength: `schema_only` → `write_only` → `read_only` → `decision_affecting` → `production_path` → `hardware_backed`. Only the last three are paper-claimable |
+| **Caveat ledger** | Machine-readable list of known limitations at `results/audit/<commit>/caveat_ledger.json`. Free-text caveats are rejected; every entry names the claim affected, blocks-paper-claim flag, and required-to-close action (M-31A; `compgen.audit.caveat_ledger`) |

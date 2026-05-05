@@ -320,9 +320,23 @@ def run_graph_compilation(
         )
 
     out_dir = Path(out_dir).resolve()
+    # M-31A.2: COMPGEN_FORCE_REBUILD=1 inverts the default. By default
+    # run_graph_compilation rm-rfs out_dir for convenience; under
+    # COMPGEN_FORCE_REBUILD we refuse to silently destroy data and
+    # require the operator to clean up first. This is the audit-mode
+    # safety check: an audit run that overwrote a prior run would
+    # confuse cold/warm reasoning.
+    _force_rebuild = os.environ.get("COMPGEN_FORCE_REBUILD") == "1"
     if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
+        if _force_rebuild and any(out_dir.iterdir()):
+            from compgen.audit.errors import AuditError
+            raise AuditError(
+                f"COMPGEN_FORCE_REBUILD=1 set, but {out_dir} is non-empty. "
+                "Either rm -rf the directory first, or unset the env var."
+            )
+        if not _force_rebuild:
+            shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     model_cfg = ModelConfig.load(Path(model_config_path))
     target_cfg = TargetConfig.load(Path(target_config_path))
@@ -331,6 +345,13 @@ def run_graph_compilation(
 
     if run_id is None:
         run_id = f"graphcomp_{model_cfg.model_id}_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+
+    # M-31A.2: snapshot sys.modules at the top of the run so the post-run
+    # diff names exactly the modules this run loaded. The snapshot is
+    # cheap (one sorted list comprehension) and gives every run an
+    # auditable import provenance.
+    from compgen.audit.import_provenance import ImportSnapshot
+    _import_snapshot_before = ImportSnapshot.take("before")
 
     ledger_path = out_dir / "stage_ledger.jsonl"
     ledger_path.write_text("", encoding="utf-8")
@@ -1279,6 +1300,39 @@ def run_graph_compilation(
     manifest_path.write_text(
         json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+
+    # M-31A.2: write import_provenance.json. Anchored to the same seam
+    # as the manifest so cross-references are stable (run_id matches).
+    try:
+        from compgen.audit.import_provenance import (
+            ImportSnapshot,
+            compute_provenance,
+            write_provenance,
+        )
+
+        _provenance = compute_provenance(
+            before=_import_snapshot_before,
+            after=ImportSnapshot.take("after"),
+            run_id=run_id,
+            selection_mode=selection_mode,
+            source_commit=_git_commit_or_none(repo_root) or "",
+        )
+        write_provenance(_provenance, run_dir=out_dir)
+        _append_ledger(
+            ledger_path, stage_id="trust_audit",
+            event="artifact_written",
+            note=(
+                f"import_provenance.json (cache_mode={_provenance.cache_mode}, "
+                f"evidence_mode={_provenance.evidence_mode}, "
+                f"forbidden_count={len(_provenance.forbidden_modules_imported)})"
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 - best-effort
+        _append_ledger(
+            ledger_path, stage_id="trust_audit",
+            event="artifact_written",
+            note=f"import_provenance error {type(exc).__name__}: {exc}",
+        )
 
     # M-26 promotion bridge (Section 19, write side). Must fire AFTER
     # run_manifest.json is on disk: the bridge reads the manifest to
