@@ -111,10 +111,18 @@ def _retrieve_promoted_for_region(
         )
         if not region_sig_hash:
             return []
+        # Resolve library_path against the repo root (parents[3] from
+        # this file, mirroring run.py). Bare ``Path('.compgen_cache')``
+        # is cwd-relative and the pipeline's cwd is not always the
+        # repo — caught during M-30 real-workload validation.
+        from pathlib import Path as _P
+        repo_root = _P(__file__).resolve().parents[3]
+        library = repo_root / ".compgen_cache" / "recipes"
         return retrieve_for_region(
             region_signature=region_sig_hash,
             contract_hash="",  # M-26 ships without contract_hash plumbing.
             target_class=target_id,
+            library_path=library,
         )
     except Exception:  # noqa: BLE001 - retrieval is best-effort
         return []
@@ -427,18 +435,13 @@ def build_agent_decision_request(
         c["candidate_id"]: c for c in candidate_actions.get("candidates", [])
     }
 
-    # M-28: prepare promoted-candidate retrieval context. Read the
-    # target_id from the run manifest so we can filter promoted
-    # recipes by target_class (a recipe proven on host_cpu must not
-    # surface for cuda_sm75).
-    target_id_for_retrieval = ""
-    try:
-        manifest = _read_json(run_dir / "run_manifest.json")
-        target_id_for_retrieval = (
-            manifest.get("target", {}).get("target_id", "") if manifest else ""
-        )
-    except Exception:  # noqa: BLE001 - retrieval is best-effort
-        target_id_for_retrieval = ""
+    # M-28: prepare promoted-candidate retrieval context. Pull
+    # target_id from llm_action_space (already loaded above) — the
+    # run_manifest.json doesn't exist yet at M-14A explicit-emission
+    # time, so reading it would yield empty and the bridge's
+    # signature derivation would diverge from the read-side
+    # derivation. Caught during M-30 real-workload validation.
+    target_id_for_retrieval = llm_view.get("target_id", "") or ""
 
     # candidate_ids_allowed: every legal candidate visible to the agent.
     candidate_ids_allowed: list[str] = []

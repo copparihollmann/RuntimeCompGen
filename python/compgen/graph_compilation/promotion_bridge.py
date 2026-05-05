@@ -65,8 +65,14 @@ log = structlog.get_logger(__name__)
 
 
 # Default library path mirrors ``RecipePromoter`` usage elsewhere
-# (``.compgen_cache/recipes/`` is the gitignored deterministic library).
-_DEFAULT_LIBRARY_PATH = Path(".compgen_cache") / "recipes"
+# (``.compgen_cache/recipes/`` is the gitignored deterministic
+# library). Resolved against the repo root rather than cwd so the
+# bridge writes to the same library regardless of where the pipeline
+# was invoked from. Caught during M-30 real-workload validation:
+# ``Path(".compgen_cache")`` was cwd-relative, which silently put
+# different runs into different libraries when cwd drifted.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_DEFAULT_LIBRARY_PATH = _REPO_ROOT / ".compgen_cache" / "recipes"
 
 
 @dataclass(frozen=True)
@@ -115,10 +121,60 @@ def _short_sha(value: str, *, length: int = 16) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:length]
 
 
+def _resolve_region_dossier(run_dir: Path, region_id: str) -> Path | None:
+    """Find ``02_graph_analysis/region_dossiers/<region_id>__<hash>.json``.
+
+    Phase B writes region dossiers as ``<region_id>__<8-char-hash>.json``.
+    The bridge's first cut assumed the hash-less form and silently
+    fell back to ``unknown`` op_family when the file was absent —
+    smoke-test on merlin_mlp_wide caught it.
+    """
+    if not region_id:
+        return None
+    base = run_dir / "02_graph_analysis" / "region_dossiers"
+    if not base.is_dir():
+        return None
+    # Exact match first (legacy fixtures), then prefix match.
+    exact = base / f"{region_id}.json"
+    if exact.is_file():
+        return exact
+    matches = sorted(base.glob(f"{region_id}__*.json"))
+    return matches[0] if matches else None
+
+
+def _resolve_payload_path(run_dir: Path) -> Path | None:
+    """Return the canonical payload.mlir path for this run.
+
+    Phase B writes payload.mlir at one of two locations depending on
+    capture mode: ``01_payload_lowering/export_program/payload.mlir``
+    for clean torch.export captures, or
+    ``01_payload_lowering/dynamo_partitions/partition_000/payload.mlir``
+    for graph-broken models. Earlier runs wrote it to
+    ``01_payload_lowering/payload.mlir``; we still check that location
+    last for forward compatibility with older fixtures.
+    """
+    pl_dir = run_dir / "01_payload_lowering"
+    candidates = [
+        pl_dir / "export_program" / "payload.mlir",
+        pl_dir / "payload.mlir",
+    ]
+    for cand in candidates:
+        if cand.is_file():
+            return cand
+    # Fall back to the first dynamo partition that has a payload.
+    partitions_dir = pl_dir / "dynamo_partitions"
+    if partitions_dir.is_dir():
+        for partition in sorted(partitions_dir.iterdir()):
+            cand = partition / "payload.mlir"
+            if cand.is_file():
+                return cand
+    return None
+
+
 def _read_payload_text(run_dir: Path) -> str | None:
     """Read the canonical Payload IR text for hashing into ``model_hash``."""
-    payload_path = run_dir / "01_payload_lowering" / "payload.mlir"
-    if not payload_path.is_file():
+    payload_path = _resolve_payload_path(run_dir)
+    if payload_path is None:
         return None
     return payload_path.read_text(encoding="utf-8")
 
@@ -126,26 +182,38 @@ def _read_payload_text(run_dir: Path) -> str | None:
 def _gather_differential_outcomes(rp: Path) -> dict[str, Any]:
     """Read whichever Phase B differential reports exist.
 
-    Returns a dict with three optional sub-blocks:
-
-    - ``post_lowering`` from M-08
-    - ``differential`` from M-09
-    - ``real_transform`` from M-12
-    - ``real_fusion`` from M-16.2
-
-    Missing reports are simply absent from the dict.
+    Returns a dict with optional sub-blocks (``post_lowering``,
+    ``differential``, ``real_transform``, ``real_fusion``). Missing
+    reports are simply absent from the dict. Path layout was
+    corrected after the first real-workload smoke test — Phase B
+    nests these under per-stage subdirs, not at the recipe-planning
+    root, so each candidate lists multiple known-good locations.
     """
     outcomes: dict[str, Any] = {}
-    candidates: dict[str, str] = {
-        "post_lowering": "post_lowering_verification_report.json",
-        "differential": "differential_verification_report.json",
-        "real_transform": "real_transform_differential_report.json",
-        "real_fusion": "real_fusion_differential_report.json",
+    candidates: dict[str, tuple[Path, ...]] = {
+        "post_lowering": (
+            rp / "post_lowering" / "post_lowering_verification_report.json",
+            rp / "post_lowering_verification_report.json",  # legacy
+        ),
+        "differential": (
+            rp / "differential_verification" / "differential_verification_report.json",
+            rp / "differential_verification_report.json",  # legacy
+        ),
+        "real_transform": (
+            rp / "real_verification" / "real_differential_report.json",
+            rp / "real_transform_differential_report.json",  # legacy
+        ),
+        "real_fusion": (
+            rp / "real_fusion_verification" / "real_fusion_differential_report.json",
+            rp / "real_fusion_differential_report.json",  # legacy
+        ),
     }
-    for label, fname in candidates.items():
-        report = _read_json(rp / fname)
-        if report is not None:
-            outcomes[label] = report
+    for label, paths in candidates.items():
+        for p in paths:
+            report = _read_json(p)
+            if report is not None:
+                outcomes[label] = report
+                break
     return outcomes
 
 
@@ -241,8 +309,17 @@ def _derive_region_signature(
     (M-27 ops_provenance, M-28 retrieval) will tighten the signature
     once Recipe IR carries the full pattern.
     """
-    dossier_path = run_dir / "02_graph_analysis" / "region_dossiers" / f"{region_id}.json"
-    dossier = _read_json(dossier_path) or {}
+    dossier_path = _resolve_region_dossier(run_dir, region_id)
+    dossier = _read_json(dossier_path) if dossier_path else {}
+    dossier = dossier or {}
+
+    # Prefer the dossier's ``kind`` over whatever the caller passed —
+    # the write side passes the post-override op_family ("matmul"),
+    # but the read side gets the *site* kind from llm_action_space
+    # ("tiling", "fusion", ...). Without the override, write and
+    # read hash to different signatures and retrieval misses.
+    if isinstance(dossier.get("kind"), str) and dossier["kind"]:
+        kind = dossier["kind"]
 
     # Dtype: pick the first dtype tag whose numerical_sensitivity entry
     # reports status=safe (or fall back to fp32).
@@ -458,12 +535,13 @@ def _emit_impl(
     # Compute the region signature.
     region_id = selection.get("region_id") or ""
     region_kind = (selection.get("candidate_kind") or "").split("_")[0] or "unknown"
-    # Better op_family from the dossier when available.
-    dossier = _read_json(
-        run_dir / "02_graph_analysis" / "region_dossiers" / f"{region_id}.json"
-    )
-    if dossier and isinstance(dossier.get("kind"), str):
-        region_kind = dossier["kind"]
+    # Prefer dossier ``kind`` when the dossier is found (real layout
+    # uses ``<region_id>__<hash>.json``; the legacy hash-less form
+    # is also accepted).
+    dossier_path_for_kind = _resolve_region_dossier(run_dir, region_id)
+    dossier_for_kind = _read_json(dossier_path_for_kind) if dossier_path_for_kind else None
+    if dossier_for_kind and isinstance(dossier_for_kind.get("kind"), str):
+        region_kind = dossier_for_kind["kind"]
 
     region_sig_hash, region_sig_fields = _derive_region_signature(
         run_dir=run_dir,
@@ -497,22 +575,31 @@ def _emit_impl(
     # Construct the bundle. Artifacts are referenced relative to
     # bundle_root (the run dir) so RecipePromoter copies them into the
     # library as part of promotion.
+    payload_path_resolved = _resolve_payload_path(run_dir)
     artifacts: dict[str, str] = {
         "verification_report": "04_promotion/verification_report.json",
-        "payload": "01_payload_lowering/payload.mlir",
     }
+    if payload_path_resolved is not None:
+        artifacts["payload"] = str(
+            payload_path_resolved.relative_to(run_dir).as_posix()
+        )
     if (rp_dir / "recipe.mlir").is_file():
         artifacts["recipe_mlir"] = "03_recipe_planning/recipe.mlir"
     if (rp_dir / "candidate_selection.json").is_file():
         artifacts["candidate_selection"] = "03_recipe_planning/candidate_selection.json"
-    for label, fname in (
-        ("post_lowering_report", "post_lowering_verification_report.json"),
-        ("differential_report", "differential_verification_report.json"),
-        ("real_transform_diff_report", "real_transform_differential_report.json"),
-        ("real_fusion_diff_report", "real_fusion_differential_report.json"),
-    ):
-        if (rp_dir / fname).is_file():
-            artifacts[label] = f"03_recipe_planning/{fname}"
+    optional_reports: tuple[tuple[str, Path], ...] = (
+        ("post_lowering_report",
+         rp_dir / "post_lowering" / "post_lowering_verification_report.json"),
+        ("differential_report",
+         rp_dir / "differential_verification" / "differential_verification_report.json"),
+        ("real_transform_diff_report",
+         rp_dir / "real_verification" / "real_differential_report.json"),
+        ("real_fusion_diff_report",
+         rp_dir / "real_fusion_verification" / "real_fusion_differential_report.json"),
+    )
+    for label, abs_path in optional_reports:
+        if abs_path.is_file():
+            artifacts[label] = abs_path.relative_to(run_dir).as_posix()
 
     model_hash = _short_sha(payload_text, length=16)
     bundle_metadata: dict[str, Any] = {

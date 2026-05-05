@@ -169,20 +169,38 @@ def _check_observed(rp: Path) -> tuple[bool, str]:
 
 
 def _check_verified_fx(rp: Path) -> tuple[bool, str, dict[str, Any]]:
-    """M-12 (real_transform_differential) or M-16.2 (real_fusion) pass."""
+    """M-12 (real_transform_differential) or M-16.2 (real_fusion) pass.
+
+    Phase B writes these reports under per-stage subdirs
+    (``real_verification/``, ``real_fusion_verification/``,
+    ``differential_verification/``); legacy fixtures used the flat
+    layout. Each candidate lists both locations.
+    """
     summary: dict[str, Any] = {}
-    for label, fname in (
-        ("real_transform", "real_transform_differential_report.json"),
-        ("real_fusion", "real_fusion_differential_report.json"),
-        ("differential", "differential_verification_report.json"),
-    ):
-        report = _read_json(rp / fname)
-        if report is None:
-            continue
-        status = report.get("status") or report.get("overall")
-        summary[f"fx_{label}"] = status
-        if _status_passed(status):
-            return True, f"{label}={status}", summary
+    candidates: tuple[tuple[str, tuple[Path, ...]], ...] = (
+        ("real_transform", (
+            rp / "real_verification" / "real_differential_report.json",
+            rp / "real_transform_differential_report.json",
+        )),
+        ("real_fusion", (
+            rp / "real_fusion_verification" / "real_fusion_differential_report.json",
+            rp / "real_fusion_differential_report.json",
+        )),
+        ("differential", (
+            rp / "differential_verification" / "differential_verification_report.json",
+            rp / "differential_verification_report.json",
+        )),
+    )
+    for label, paths in candidates:
+        for p in paths:
+            report = _read_json(p)
+            if report is None:
+                continue
+            status = report.get("status") or report.get("overall")
+            summary[f"fx_{label}"] = status
+            if _status_passed(status):
+                return True, f"{label}={status}", summary
+            break  # first found wins; don't fall through to legacy on miss
     return False, "no FX-level differential pass found", summary
 
 
