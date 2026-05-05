@@ -221,6 +221,15 @@ def _synthesize_verification_report(
     return out_path, "passed"
 
 
+def derive_region_signature(
+    *, run_dir: Path, region_id: str, target_id: str, kind: str
+) -> tuple[str, dict[str, str]]:
+    """Public M-28 entry point — see :func:`_derive_region_signature`."""
+    return _derive_region_signature(
+        run_dir=run_dir, region_id=region_id, target_id=target_id, kind=kind,
+    )
+
+
 def _derive_region_signature(
     *, run_dir: Path, region_id: str, target_id: str, kind: str
 ) -> tuple[str, dict[str, str]]:
@@ -563,4 +572,4 @@ def _emit_impl(
     )
 
 
-__all__ = ["PromotionEmissionResult", "emit"]
+__all__ = ["PromotionEmissionResult", "derive_region_signature", "emit"]
