@@ -571,22 +571,32 @@ def build_agent_decision_request(
             if path.exists() else None
         )
 
-    # M-31A.3: bound the agent's vocabulary at the request level. The
-    # legal-candidate gate already restricts which candidate_ids it can
-    # pick; passes_allowed and forbidden_actions name the *kinds* of
-    # actions it can / cannot take. These are constant for now (no pass
-    # registry yet — that lands in M-31). When M-31 ships pass cards,
-    # this list becomes per-region.
-    passes_allowed = [
-        "set_tile_params",
-        "fuse_producer_consumer",
-    ]
+    # M-31: pass-card registry. ``passes_allowed`` is now derived from
+    # the on-disk pass-card registry (docs/generated/pass_cards/) rather
+    # than a hardcoded list — every id resolves to a typed PassCard the
+    # agent can read inline via the ``pass_cards`` field below. The
+    # registry asserts uniqueness at load time, so duplicate ids would
+    # have raised before reaching this point.
+    #
+    # The forbidden_actions list remains a constant: these are
+    # categorical anti-patterns (editing IR directly, inventing ids)
+    # that cannot be expressed as missing pass cards.
+    from compgen.passes.cards import PassCardRegistry, default_registry_root
+
+    _pass_registry = PassCardRegistry.load(default_registry_root())
+    passes_allowed = list(_pass_registry.passes_allowed())
+    pass_cards_inline = [c.to_dict() for c in _pass_registry]
     forbidden_actions = [
         "edit_payload_directly",
         "invent_candidate_id",
         "invent_pass_id",
         "invent_tile_sizes",
     ]
+    # Defence in depth: any pass id we're about to expose must resolve
+    # to a real card. This is a no-op when passes_allowed is itself
+    # derived from the registry but guards against future regressions
+    # that re-introduce hardcoded ids.
+    _pass_registry.assert_resolvable(passes_allowed)
 
     # M-31A.2: surface whether the recipe-memory cache was consulted
     # this run. The retrieval path honors COMPGEN_DISABLE_RECIPE_MEMORY;
@@ -613,10 +623,15 @@ def build_agent_decision_request(
         },
         "sources": sources,
         "candidate_ids_allowed": candidate_ids_allowed,
-        # M-31A.3: action vocabulary. ``passes_allowed`` names the kinds
-        # of compiler actions the agent can request; ``forbidden_actions``
-        # names anti-patterns the agent must not take.
+        # M-31A.3 + M-31: action vocabulary. ``passes_allowed`` names
+        # the kinds of compiler actions the agent can request, derived
+        # from the on-disk pass-card registry (M-31). ``pass_cards`` is
+        # the typed inline projection of every card so the agent can
+        # read preconditions / invalidates / failure_modes without an
+        # extra fetch. ``forbidden_actions`` names categorical
+        # anti-patterns (not pass-shaped, so not in the registry).
         "passes_allowed": passes_allowed,
+        "pass_cards": pass_cards_inline,
         "forbidden_actions": forbidden_actions,
         "visible_regions": visible_regions,
         # M-28: top-level summary of every promoted candidate found
@@ -745,6 +760,33 @@ def validate_agent_decision_response(
     _add("response_schema_valid", schema_ok, schema_detail)
     if not schema_ok:
         failures.append(f"response schema invalid: {schema_detail}")
+
+    # 2a. M-31 pass-card resolvability — every id in passes_allowed
+    # must resolve to a real card on disk. This is the request-side
+    # check; if a pass were exposed without a card, the agent would
+    # see a name with no semantics and might invent behavior.
+    passes_allowed_in_req = list(request.get("passes_allowed") or [])
+    if passes_allowed_in_req:
+        try:
+            from compgen.passes.cards import (
+                PassCardRegistry,
+                default_registry_root,
+            )
+
+            _registry = PassCardRegistry.load(default_registry_root())
+            _registry.assert_resolvable(passes_allowed_in_req)
+            _add(
+                "passes_allowed_resolve_to_cards", True,
+                f"{len(passes_allowed_in_req)} pass ids resolved",
+            )
+        except Exception as exc:  # noqa: BLE001
+            _add(
+                "passes_allowed_resolve_to_cards", False,
+                f"{type(exc).__name__}: {exc}",
+            )
+            failures.append(
+                f"passes_allowed contains ids without pass cards: {exc}"
+            )
 
     # 2b. M-31A.3 decision-id discipline — when the request carries a
     # decision_id AND the response carries one, they must match. A

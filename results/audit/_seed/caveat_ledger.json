@@ -36,13 +36,18 @@
       "created_at_utc": "2026-05-05T00:00:00Z",
       "evidence_paths": [
         "python/compgen/audit/negative_controls.py",
-        "python/compgen/audit/errors.py"
+        "python/compgen/audit/errors.py",
+        "python/compgen/passes/cards.py",
+        "docs/generated/pass_cards/set_tile_params.yaml",
+        "docs/generated/pass_cards/fuse_producer_consumer.yaml",
+        "tests/passes/test_pass_card.py",
+        "tests/passes/test_seed_cards.py"
       ],
       "id": "negative_controls_pass_card_placeholder",
       "is_bug": false,
       "last_verified_at_utc": "2026-05-05T00:00:00Z",
-      "notes": "M-31A ships placeholder typed errors for pass-card / precondition / invalidation negative controls. Full implementations land in M-31 (pass cards), which ships behind this gate. Until then the negative-control test asserts the typed-error machinery exists and is wired through trust_report.",
-      "required_to_close": "M-31 lands a real pass-card registry; replace placeholder negative controls with real fault injection against MissingPassCard / PreconditionViolation / StaleAnalysisAudit",
+      "notes": "M-31 ships the real pass-card registry. The MissingPassCard negative control is now real fault injection (build a registry with one card missing; assert the validator raises). The PreconditionViolation and StaleAnalysisAudit controls remain placeholder — they convert to real fault injection in M-32 (multi-level analysis) and M-33 (analysis invalidation discipline) respectively.",
+      "required_to_close": "M-32 lands real PreconditionViolation injection (run a pass on IR that fails its preconditions); M-33 lands real StaleAnalysisAudit injection (consume an analysis summary the upstream pass invalidated). The MissingPassCard portion of this caveat is resolved by M-31.",
       "status": "open"
     }
   ]

@@ -277,14 +277,31 @@ def control_replay_input_hash_mismatch(tmp_path: Path) -> NegativeControlOutcome
 
 
 def control_pass_card_missing(tmp_path: Path) -> NegativeControlOutcome:
-    """Placeholder: when M-31 ships pass cards, this control will remove
-    a card for an exposed pass and verify request generation fails. For
-    M-31A the typed-error machinery is the deliverable."""
+    """M-31 real fault injection: build a registry containing only one
+    of the production passes, then ask the validator to resolve a
+    request that references the OTHER one. The validator must raise
+    :class:`MissingPassCard`.
+
+    This catches the failure mode where the agent's vocabulary
+    drifts ahead of the registry (a pass id is exposed but its card
+    was never authored).
+    """
+    import shutil
+    from compgen.passes.cards import PassCardRegistry
+
+    real_root = Path(__file__).resolve().parents[3] / "docs" / "generated" / "pass_cards"
+    fake_root = tmp_path / "pass_cards"
+    fake_root.mkdir(parents=True, exist_ok=True)
+    # Copy ONLY one card; pretend the other was never authored.
+    src = real_root / "set_tile_params.yaml"
+    if src.exists():
+        shutil.copy(src, fake_root / "set_tile_params.yaml")
+
     def _fn() -> None:
-        raise MissingPassCard(
-            "pass 'set_tile_params' has no pass card "
-            "(placeholder; full implementation lands with M-31)"
-        )
+        registry = PassCardRegistry.load(fake_root)
+        # The agent's vocabulary references both; the registry knows only one.
+        registry.assert_resolvable(["set_tile_params", "fuse_producer_consumer"])
+
     return _expect(
         name="pass_card_missing",
         expected_error=MissingPassCard,
