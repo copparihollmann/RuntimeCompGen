@@ -276,7 +276,21 @@ class PassCardRegistry:
     root: Path | None = None
 
     @classmethod
-    def load(cls, root: Path) -> PassCardRegistry:
+    def load(
+        cls,
+        root: Path,
+        *,
+        validate_summary_invalidates: bool = True,
+    ) -> PassCardRegistry:
+        """Load + validate every pass card under ``root``.
+
+        ``validate_summary_invalidates`` (default True) cross-links each
+        card's ``invalidates`` field with the analysis-summary registry
+        (M-32). Unknown summary ids raise :class:`PassCardError`. The
+        flag exists so the M-32 schema tests can build a fresh registry
+        without circular-import drama; production callers should leave
+        it at the default.
+        """
         registry = cls(root=Path(root))
         for card in iter_cards(Path(root)):
             if card.pass_id in registry.cards:
@@ -285,7 +299,32 @@ class PassCardRegistry:
                     f"({registry.cards[card.pass_id].source_path} vs {card.source_path})"
                 )
             registry.cards[card.pass_id] = card
+        if validate_summary_invalidates:
+            registry._cross_link_invalidates_to_summaries()
         return registry
+
+    def _cross_link_invalidates_to_summaries(self) -> None:
+        """Assert every card's ``invalidates`` references a known summary id.
+
+        M-32 cross-link: pass cards declare which summaries they
+        invalidate; M-33 enforces that downstream consumers do not
+        read a stale summary. Without this cross-link, a typo in an
+        ``invalidates`` field would be silently invisible to the
+        invalidation tracker.
+        """
+        from compgen.analysis.checkpoints import (
+            AnalysisSummaryError,
+            assert_resolvable,
+        )
+
+        for card in self.cards.values():
+            try:
+                assert_resolvable(list(card.invalidates))
+            except AnalysisSummaryError as exc:
+                raise PassCardError(
+                    f"pass card {card.pass_id} declares invalidates {list(card.invalidates)} "
+                    f"but at least one id is not a known analysis summary: {exc}"
+                ) from exc
 
     def __contains__(self, pass_id: str) -> bool:
         return pass_id in self.cards

@@ -598,6 +598,16 @@ def build_agent_decision_request(
     # that re-introduce hardcoded ids.
     _pass_registry.assert_resolvable(passes_allowed)
 
+    # M-32: multi-level analysis index. Walk the run dir for every
+    # known analysis summary, record its content_hash + dependencies +
+    # availability. The agent reads this to know which inputs are
+    # fresh (M-33 enforces invalidation discipline; for M-32 the
+    # block is informative only).
+    from compgen.analysis.checkpoints import AnalysisIndex
+
+    _analysis_index = AnalysisIndex.from_run_dir(run_dir)
+    analysis_summaries_inline = [s.to_dict() for s in _analysis_index]
+
     # M-31A.2: surface whether the recipe-memory cache was consulted
     # this run. The retrieval path honors COMPGEN_DISABLE_RECIPE_MEMORY;
     # echoing it back tells the audit "no, this run didn't use cached
@@ -632,6 +642,12 @@ def build_agent_decision_request(
         # anti-patterns (not pass-shaped, so not in the registry).
         "passes_allowed": passes_allowed,
         "pass_cards": pass_cards_inline,
+        # M-32: multi-level analysis index. One entry per known summary
+        # the pipeline can emit; ``available=true`` rows carry a
+        # content_hash. Pass cards' ``invalidates`` field references
+        # entries here by id; M-33 will turn that cross-reference into
+        # an enforceable invalidation contract.
+        "analysis_summaries": analysis_summaries_inline,
         "forbidden_actions": forbidden_actions,
         "visible_regions": visible_regions,
         # M-28: top-level summary of every promoted candidate found

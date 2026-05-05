@@ -212,3 +212,32 @@ def test_iter_cards_returns_sorted(tmp_path: Path) -> None:
     (tmp_path / "a_pass.yaml").write_text(yaml.safe_dump(raw_b))
     cards = list(iter_cards(tmp_path))
     assert [c.pass_id for c in cards] == ["a_pass", "z_pass"]
+
+
+def test_registry_rejects_unknown_invalidates_id(tmp_path: Path) -> None:
+    """M-32 cross-link: invalidates ids must resolve to known summaries."""
+    raw = _good_card_dict()
+    raw["invalidates"] = ["totally_made_up_summary"]
+    (tmp_path / "demo_pass.yaml").write_text(yaml.safe_dump(raw))
+    with pytest.raises(PassCardError, match="known analysis summary"):
+        PassCardRegistry.load(tmp_path)
+
+
+def test_registry_accepts_known_invalidates_id(tmp_path: Path) -> None:
+    """The registry default loader runs the cross-link; known ids pass."""
+    raw = _good_card_dict()
+    raw["invalidates"] = ["payload_summary", "graph_dossier_v3"]
+    (tmp_path / "demo_pass.yaml").write_text(yaml.safe_dump(raw))
+    reg = PassCardRegistry.load(tmp_path)
+    assert "demo_pass" in reg
+
+
+def test_registry_skip_cross_link_with_flag(tmp_path: Path) -> None:
+    """When an integrator wants to test card schema without summary
+    cross-link, the flag disables the check."""
+    raw = _good_card_dict()
+    raw["invalidates"] = ["totally_made_up_summary"]
+    (tmp_path / "demo_pass.yaml").write_text(yaml.safe_dump(raw))
+    # Should not raise with the flag off
+    reg = PassCardRegistry.load(tmp_path, validate_summary_invalidates=False)
+    assert "demo_pass" in reg

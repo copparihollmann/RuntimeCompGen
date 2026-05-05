@@ -305,6 +305,10 @@ allowed_nonproduction_symbols:
     reason: "M-31's realness contract; the forbidden list names the residual words it bans (hardcoded passes_allowed list). Meta-reference, not a residual"
     forbidden_in: []
 
+  - path: docs/realness/m32_multi_level_analysis.yaml
+    reason: "M-32's realness contract; meta-reference, not a residual"
+    forbidden_in: []
+
 # Patterns we tolerate inside any source file (e.g. comment markers in
 # docs / generated stubs / strings). The base scanner already excludes
 # .compgen_cache, .crg-artifacts, results/, __pycache__, .git, and tests/
