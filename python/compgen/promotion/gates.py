@@ -228,24 +228,39 @@ def _check_verified_kernel(run_dir: Path) -> tuple[bool, str, dict[str, Any]]:
     return False, "no compiled-kernel differential pass found", summary
 
 
+def _nested_count(report: dict[str, Any] | None, key: str) -> int:
+    """Read a count from a Phase B report — top-level OR nested under summary.
+
+    M-21 / M-22 / M-22.1 reports keep their counts in a ``summary``
+    sub-block (e.g. ``summary.candidates_modeled = 15`` instead of
+    ``candidates_modeled = 15`` at top-level). Real-workload smoke
+    test caught the gate evaluator reading the wrong layer.
+    """
+    if report is None:
+        return 0
+    val = report.get(key)
+    if val is None:
+        val = (report.get("summary") or {}).get(key)
+    return int(val or 0)
+
+
 def _check_characterized(run_dir: Path) -> tuple[bool, str, dict[str, Any]]:
     """M-21 analytical cost AND (M-22 OR M-22.1) measured cost present."""
     ga = run_dir / "02_graph_analysis"
     summary: dict[str, Any] = {}
 
     analytical = _read_json(ga / "analytical_cost" / "per_candidate_analytical_cost.json")
-    has_analytical = analytical is not None and (
-        analytical.get("candidates_modeled", 0) or 0
-    ) > 0
+    has_analytical = _nested_count(analytical, "candidates_modeled") > 0
     summary["m21_analytical"] = "present" if has_analytical else "missing"
 
-    measured = (
-        _read_json(ga / "compiled_bottleneck" / "compiled_bottleneck_report.json")
-        or _read_json(ga / "profiler_evidence" / "profiler_evidence_report.json")
+    bottleneck = _read_json(ga / "compiled_bottleneck" / "compiled_bottleneck_report.json")
+    profiler = _read_json(ga / "profiler_evidence" / "profiler_evidence_report.json")
+    has_bottleneck = _nested_count(bottleneck, "region_count_with_evidence") > 0
+    has_profiler = (
+        _nested_count(profiler, "gpu_collected_count") > 0
+        or _nested_count(profiler, "cpu_collected_count") > 0
     )
-    has_measured = measured is not None and (
-        measured.get("region_count_with_evidence", 0) or 0
-    ) > 0
+    has_measured = has_bottleneck or has_profiler
     summary["m22_or_m221_measured"] = "present" if has_measured else "missing"
 
     if not has_analytical:
@@ -264,8 +279,10 @@ def _check_promoted(run_dir: Path) -> tuple[bool, str, dict[str, Any]]:
     fx_overall = (fx_matrix or {}).get("overall") or "missing"
     summary["m17_1_fx_readiness"] = fx_overall
 
-    kernel_matrix = _read_json(
-        ga / "kernel_section_readiness" / "kernel_section_readiness_matrix.json"
+    # M-24 readiness matrix has lived at two paths historically; check both.
+    kernel_matrix = (
+        _read_json(ga / "kernel_readiness" / "kernel_section_readiness_matrix.json")
+        or _read_json(ga / "kernel_section_readiness" / "kernel_section_readiness_matrix.json")
     )
     kernel_overall = (kernel_matrix or {}).get("overall") or "missing"
     summary["m24_kernel_readiness"] = kernel_overall

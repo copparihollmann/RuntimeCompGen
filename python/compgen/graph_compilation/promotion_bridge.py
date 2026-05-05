@@ -299,6 +299,43 @@ def derive_region_signature(
     )
 
 
+def derive_contract_hash(
+    *,
+    candidate_selection: dict[str, Any],
+    region_signature_fields: dict[str, str],
+) -> str:
+    """Synthesize the M-26 exact-kernel ``contract_hash``.
+
+    Phase B does not currently persist :class:`KernelContractV3`
+    objects to disk for every region (the lowering manifest reports
+    ``kernel_contracts: 0`` for ``SetTileParams`` recipes), so the
+    bridge constructs the kernel-identity hash directly from the
+    candidate's recipe_delta plus the region's dtype/layout/shape
+    facts and target_class. Two regions whose recipe_delta + facts
+    canonicalise identically produce the same hash; the M-28
+    retrieval can then surface a previously-compiled kernel as an
+    exact-contract match without re-codegenning.
+
+    The hash is stable across runs (same model + tile spec + target
+    on the same machine produces the same key).
+    """
+    payload: dict[str, Any] = {
+        "candidate_kind": candidate_selection.get("candidate_kind", ""),
+        "recipe_delta": list(candidate_selection.get("recipe_delta") or []),
+        "region": {
+            "op_family": region_signature_fields.get("op_family", ""),
+            "dtype": region_signature_fields.get("dtype", ""),
+            "layout": region_signature_fields.get("layout", ""),
+            "shape_class": region_signature_fields.get("shape_class", ""),
+            "target_class": region_signature_fields.get("target_class", ""),
+        },
+    }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
+
+
 def _derive_region_signature(
     *, run_dir: Path, region_id: str, target_id: str, kind: str
 ) -> tuple[str, dict[str, str]]:
@@ -354,6 +391,66 @@ def _derive_region_signature(
     return hash_region_signature(sig), sig.to_dict()
 
 
+def _derive_applies_when(dossier: dict[str, Any] | None) -> tuple[str, ...]:
+    """Project the region dossier into a tuple of fact predicates.
+
+    Phase B's dossier already encodes the facts a future run needs to
+    decide whether a promoted recipe still applies — they're spread
+    across ``legality_constraints``, ``numerical_sensitivity``, and
+    ``placement_envelope``. We project each into a stable string
+    predicate so the M-26 sidecar can carry them and M-28 retrieval
+    can filter or rank by them.
+
+    Predicate string forms (informal but stable):
+
+    - ``can_tile`` / ``can_fuse_with_single_consumer`` /
+      ``can_quantize_fp8`` — from ``legality_constraints[].constraint``
+      with ``ok=True``.
+    - ``numerics_safe_fp32`` / ``numerics_safe_fast_math`` /
+      ``numerics_risky_fp16_accum`` — derived from
+      ``numerical_sensitivity[*].status``.
+    - ``memory_fit_<device>`` — from
+      ``placement_envelope.devices[].memory_fit``.
+
+    Returns an ordered tuple (sorted for byte-stable output).
+    """
+    if not dossier:
+        return ()
+    predicates: set[str] = set()
+
+    for c in dossier.get("legality_constraints", []) or []:
+        if not isinstance(c, dict):
+            continue
+        name = str(c.get("constraint") or "")
+        if not name:
+            continue
+        if c.get("ok"):
+            predicates.add(name)
+
+    ns = dossier.get("numerical_sensitivity", {})
+    if isinstance(ns, dict):
+        for dtype, entry in ns.items():
+            if not isinstance(entry, dict):
+                continue
+            status = str(entry.get("status") or "")
+            if status == "safe":
+                predicates.add(f"numerics_safe_{dtype}")
+            elif status == "risky":
+                predicates.add(f"numerics_risky_{dtype}")
+            # exceeds_budget / requires_reference are not assertions
+            # the recipe relies on; skip.
+
+    pe = dossier.get("placement_envelope", {})
+    if isinstance(pe, dict):
+        for dev in pe.get("devices", []) or []:
+            if not isinstance(dev, dict):
+                continue
+            if dev.get("memory_fit") and dev.get("device"):
+                predicates.add(f"memory_fit_{dev['device']}")
+
+    return tuple(sorted(predicates))
+
+
 def _build_promoted_recipe(
     *,
     candidate_selection: dict[str, Any],
@@ -362,6 +459,7 @@ def _build_promoted_recipe(
     target_id: str,
     differential_outcomes: dict[str, Any],
     gate_evaluation: GateEvaluation | None = None,
+    applies_when: tuple[str, ...] = (),
 ) -> PromotedRecipe:
     """Construct a :class:`PromotedRecipe` from Phase B evidence."""
     candidate_id = candidate_selection.get("selected_candidate_id") or "unknown"
@@ -414,7 +512,7 @@ def _build_promoted_recipe(
         recipe_signature=region_signature_hash,
         recipe_ir_path="recipe.mlir",
         evidence_summary=evidence_summary,
-        applies_when=(),  # M-27 IR-side; not yet auto-derived.
+        applies_when=applies_when,
         fallback_chain=(),
         certificates=certificates,
         validity=validity,
@@ -550,6 +648,14 @@ def _emit_impl(
         kind=region_kind,
     )
 
+    # M-26 contract_hash — exact-kernel reuse tier. Synthesized from
+    # candidate_selection + region facts because Phase B doesn't yet
+    # persist full KernelContractV3 objects to disk for every region.
+    contract_hash_str = derive_contract_hash(
+        candidate_selection=selection,
+        region_signature_fields=region_sig_fields,
+    )
+
     # M-29: evaluate the promotion-gate ladder before constructing
     # the bundle so the gate level rides along in the sidecar +
     # memory index.
@@ -647,9 +753,16 @@ def _emit_impl(
         model_hash=result.key.model_hash,
         objective_hash=result.key.objective_hash,
         version=result.key.version,
-        contract_hash="",  # M-26 ships without kernel_contracts plumbing.
+        contract_hash=contract_hash_str,
         region_signature=region_sig_hash,
     )
+
+    # M-30 gap #3: derive applies_when from the region dossier.
+    dossier_path_for_facts = _resolve_region_dossier(run_dir, region_id)
+    dossier_for_facts = (
+        _read_json(dossier_path_for_facts) if dossier_path_for_facts else None
+    )
+    applies_when_tuple = _derive_applies_when(dossier_for_facts)
 
     promoted = _build_promoted_recipe(
         candidate_selection=selection,
@@ -658,6 +771,7 @@ def _emit_impl(
         target_id=target_id,
         differential_outcomes=differential_outcomes,
         gate_evaluation=gate_eval,
+        applies_when=applies_when_tuple,
     )
     write_promoted_recipe_sidecar(result.recipe_path, new_key, promoted)
 
@@ -682,7 +796,7 @@ def _emit_impl(
                 promotion_key=new_key.key,
                 reason="graph_compilation.promotion_bridge",
                 region_signature=region_sig_hash,
-                contract_hash="",
+                contract_hash=contract_hash_str,
                 gate_level=str(gate_eval.level) if gate_eval else "",
             )
         except Exception as exc:  # noqa: BLE001 - memory bridge is best-effort

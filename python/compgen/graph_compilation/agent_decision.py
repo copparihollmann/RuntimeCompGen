@@ -85,25 +85,36 @@ def _sha256_or_none(path: Path) -> str | None:
 
 
 def _retrieve_promoted_for_region(
-    *, run_dir: Path, region_id: str, target_id: str, kind: str
+    *,
+    run_dir: Path,
+    region_id: str,
+    target_id: str,
+    kind: str,
+    candidate_selection: dict[str, Any] | None = None,
 ) -> list[Any]:
     """Look up promoted recipes whose region pattern matches.
 
     Best-effort: degrades to an empty list on any error. Imports are
     deferred so a cold or broken recipe cache never breaks the
     request emission.
+
+    When ``candidate_selection`` is provided, the function also
+    computes the M-26 ``contract_hash`` for exact-kernel reuse and
+    passes it to retrieval — exact matches are ranked above
+    region-pattern matches.
     """
     if not region_id:
         return []
     try:
         from compgen.graph_compilation.promotion_bridge import (
+            derive_contract_hash,
             derive_region_signature,
         )
         from compgen.graph_compilation.promotion_retrieval import (
             retrieve_for_region,
         )
 
-        region_sig_hash, _fields = derive_region_signature(
+        region_sig_hash, region_sig_fields = derive_region_signature(
             run_dir=run_dir,
             region_id=region_id,
             target_id=target_id,
@@ -111,6 +122,17 @@ def _retrieve_promoted_for_region(
         )
         if not region_sig_hash:
             return []
+
+        contract_hash_str = ""
+        if candidate_selection:
+            try:
+                contract_hash_str = derive_contract_hash(
+                    candidate_selection=candidate_selection,
+                    region_signature_fields=region_sig_fields,
+                )
+            except Exception:  # noqa: BLE001
+                contract_hash_str = ""
+
         # Resolve library_path against the repo root (parents[3] from
         # this file, mirroring run.py). Bare ``Path('.compgen_cache')``
         # is cwd-relative and the pipeline's cwd is not always the
@@ -120,7 +142,7 @@ def _retrieve_promoted_for_region(
         library = repo_root / ".compgen_cache" / "recipes"
         return retrieve_for_region(
             region_signature=region_sig_hash,
-            contract_hash="",  # M-26 ships without contract_hash plumbing.
+            contract_hash=contract_hash_str,
             target_class=target_id,
             library_path=library,
         )
@@ -442,6 +464,15 @@ def build_agent_decision_request(
     # signature derivation would diverge from the read-side
     # derivation. Caught during M-30 real-workload validation.
     target_id_for_retrieval = llm_view.get("target_id", "") or ""
+    # candidate_selection.json may or may not exist yet — agent-file /
+    # llm-live modes emit the request INLINE before the resolver
+    # writes the selection; greedy mode emits via M-14A after the
+    # selection lands. When present, we use it to derive the M-26
+    # contract_hash for exact-kernel retrieval (preferred over
+    # region-pattern matches).
+    candidate_selection_for_retrieval = _read_json_or_none(
+        rp / "candidate_selection.json"
+    )
 
     # candidate_ids_allowed: every legal candidate visible to the agent.
     candidate_ids_allowed: list[str] = []
@@ -485,6 +516,7 @@ def build_agent_decision_request(
                 region_id=region_id,
                 target_id=target_id_for_retrieval,
                 kind=site.get("kind", ""),
+                candidate_selection=candidate_selection_for_retrieval,
             )
             site_promoted = [p.to_dict() for p in promoted]
             promoted_candidates_total.extend(site_promoted)
