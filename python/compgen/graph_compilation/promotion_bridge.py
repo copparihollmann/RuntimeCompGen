@@ -47,6 +47,7 @@ from typing import Any
 
 import structlog
 
+from compgen.promotion.gates import GateEvaluation, evaluate_gate
 from compgen.promotion.promote import (
     PromotedRecipe,
     PromotionResult,
@@ -283,6 +284,7 @@ def _build_promoted_recipe(
     region_signature_fields: dict[str, str],
     target_id: str,
     differential_outcomes: dict[str, Any],
+    gate_evaluation: GateEvaluation | None = None,
 ) -> PromotedRecipe:
     """Construct a :class:`PromotedRecipe` from Phase B evidence."""
     candidate_id = candidate_selection.get("selected_candidate_id") or "unknown"
@@ -318,16 +320,28 @@ def _build_promoted_recipe(
         "layout": region_signature_fields.get("layout", ""),
     }
 
+    # M-29: fold gate-evaluation evidence + level into the recipe.
+    if gate_evaluation is not None:
+        evidence_summary["gate_level"] = str(gate_evaluation.level)
+        evidence_summary["gate_reasons"] = dict(gate_evaluation.reasons)
+        # Layer gate evidence on top of differential outcomes — the
+        # gate evaluator already projects them, so this is additive.
+        for k, v in gate_evaluation.evidence_summary.items():
+            evidence_summary.setdefault(k, v)
+        gate_level_str = str(gate_evaluation.level)
+    else:
+        gate_level_str = ""
+
     return PromotedRecipe(
         recipe_id=recipe_id,
         recipe_signature=region_signature_hash,
         recipe_ir_path="recipe.mlir",
         evidence_summary=evidence_summary,
-        applies_when=(),  # M-27 will populate from PromoteOp.applies_when.
+        applies_when=(),  # M-27 IR-side; not yet auto-derived.
         fallback_chain=(),
         certificates=certificates,
         validity=validity,
-        gate_level="",  # M-29 will populate.
+        gate_level=gate_level_str,
     )
 
 
@@ -458,6 +472,28 @@ def _emit_impl(
         kind=region_kind,
     )
 
+    # M-29: evaluate the promotion-gate ladder before constructing
+    # the bundle so the gate level rides along in the sidecar +
+    # memory index.
+    gate_eval: GateEvaluation | None = None
+    try:
+        library_for_gate = (
+            Path(library_path) if library_path else _DEFAULT_LIBRARY_PATH
+        )
+        gate_eval = evaluate_gate(
+            run_dir,
+            region_signature=region_sig_hash,
+            target_class=target_id,
+            library_path=library_for_gate,
+        )
+    except Exception as exc:  # noqa: BLE001 - gate eval is best-effort
+        log.warning(
+            "promotion_bridge_gate_eval_failed",
+            run_dir=str(run_dir),
+            error=type(exc).__name__,
+            message=str(exc),
+        )
+
     # Construct the bundle. Artifacts are referenced relative to
     # bundle_root (the run dir) so RecipePromoter copies them into the
     # library as part of promotion.
@@ -479,6 +515,15 @@ def _emit_impl(
             artifacts[label] = f"03_recipe_planning/{fname}"
 
     model_hash = _short_sha(payload_text, length=16)
+    bundle_metadata: dict[str, Any] = {
+        "bundle_root": str(run_dir),
+        "model_id": model_id,
+        "run_id": manifest.get("run_id", ""),
+    }
+    if gate_eval is not None:
+        # M-29: surface the gate level into RecipePromoter so the
+        # audit log records it alongside the basic promotion event.
+        bundle_metadata["gate_level"] = str(gate_eval.level)
     bundle = Bundle(
         version="1.0",
         target_profile=target_id,
@@ -486,11 +531,7 @@ def _emit_impl(
         objective="latency",
         artifacts=artifacts,
         creation_timestamp=manifest.get("created_at_utc", ""),
-        metadata={
-            "bundle_root": str(run_dir),
-            "model_id": model_id,
-            "run_id": manifest.get("run_id", ""),
-        },
+        metadata=bundle_metadata,
     )
 
     # Promote — the gate reads the synthesized verification_report.
@@ -529,6 +570,7 @@ def _emit_impl(
         region_signature_fields=region_sig_fields,
         target_id=target_id,
         differential_outcomes=differential_outcomes,
+        gate_evaluation=gate_eval,
     )
     write_promoted_recipe_sidecar(result.recipe_path, new_key, promoted)
 
@@ -554,7 +596,7 @@ def _emit_impl(
                 reason="graph_compilation.promotion_bridge",
                 region_signature=region_sig_hash,
                 contract_hash="",
-                gate_level="",
+                gate_level=str(gate_eval.level) if gate_eval else "",
             )
         except Exception as exc:  # noqa: BLE001 - memory bridge is best-effort
             log.warning(
