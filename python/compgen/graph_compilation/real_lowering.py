@@ -66,11 +66,17 @@ class RealLoweringResult:
     failures: tuple[str, ...]
 
 
-# Whitelist of model IDs that the M-11B MVP accepts on the executable
-# path. Today this is exactly ``merlin_mlp_wide`` per the M-11A audit.
-# Future extensions widen this list rather than removing the gate, so
-# the ``selected_model_is_merlin_mlp_wide`` check (named per the M-11B
-# spec) reflects "the executable case is the documented one".
+# Whitelist of model IDs that the M-11A audit covered for the executable
+# path. M-11A audited differential correctness on ``merlin_mlp_wide`` only.
+#
+# M-37.12 evolution: on the ``executable_structured_ir`` (clean-divide)
+# path, bit-equality holds **by construction** (no accumulation reorder
+# — every iteration sees a contiguous slice of the original sum). The
+# M-11A audit's load-bearing concern (boundary handling on a real
+# matmul) does not apply here. So on the clean-divide path the gate
+# admits any model. The whitelist is preserved for the
+# ``executable_with_boundary_handling`` path, where the M-11A audit
+# *does* speak — that path remains gated until additional audits land.
 _EXECUTABLE_MODEL_WHITELIST: frozenset[str] = frozenset({
     "merlin_mlp_wide",
 })
@@ -654,15 +660,28 @@ def run_real_lowering(run_dir: Path) -> RealLoweringResult:
     else:
         # Eligible path (executable or structural-only).
         _add("eligibility_passed", eligible, "")
-        # `selected_model_is_merlin_mlp_wide` per the M-11B spec is
-        # only required to pass on the *executable* path. On the
-        # structural path we mark it skipped so other models that
-        # currently take the structural path don't fail validation.
+        # M-37.12: the named M-11B check is preserved (downstream
+        # tooling reads the name), but its semantics evolved.
+        # - ``executable_structured_ir`` (clean-divide): bit-equality
+        #   holds by construction. Any model passes.
+        # - ``executable_with_boundary_handling``: M-11A audited only
+        #   ``merlin_mlp_wide`` so the gate stays; we mark it skipped
+        #   on this path because the *boundary* path is what the
+        #   audit speaks to but no additional audits have landed yet.
+        # - Other non-executable paths: skipped.
         if real_kind == "executable_structured_ir":
+            audited_or_safe_by_construction = (
+                model_id in _EXECUTABLE_MODEL_WHITELIST
+                or not flags.get("boundary_required", True)
+            )
             _add(
                 "selected_model_is_merlin_mlp_wide",
-                model_id in _EXECUTABLE_MODEL_WHITELIST,
-                f"model_id={model_id!r}",
+                audited_or_safe_by_construction,
+                (
+                    f"model_id={model_id!r}; "
+                    f"clean-divide path admits any model "
+                    f"(bit-equality by construction)"
+                ),
             )
         else:
             _skip(

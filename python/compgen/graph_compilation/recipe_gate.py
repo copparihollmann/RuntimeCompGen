@@ -275,8 +275,18 @@ def _gate_set_tile_params(
                         and tN > 0 and N_dim % tN == 0
                         and tK > 0 and K_dim % tK == 0
                     )
+                    # M-37.12 Fix: bit_equality requires NOT just
+                    # clean-divide but also a single K iteration. With
+                    # K_iters > 1 the partial sums accumulate in a
+                    # different order than eager (eager: one running
+                    # sum across K; tiled: sum-of-tile-sums). The
+                    # values agree mathematically but float rounding
+                    # differs at ~1e-6. So bit_equality only holds
+                    # when tK >= K_dim (whole K in one tile).
+                    single_k_iter = tK > 0 and tK >= K_dim
                     extra["clean_divide"] = clean
                     extra["boundary_required"] = not clean
+                    extra["single_k_iter"] = single_k_iter
                     extra["region_dims"] = {
                         "M": M_dim, "N": N_dim, "K": K_dim,
                     }
@@ -293,14 +303,17 @@ def _gate_set_tile_params(
         else:
             failures.append(f"payload_ref does not exist: {payload_ref}")
 
-    # M-37.9 Fix 3a: claimable refinement matches the differential reality.
-    # When the tile divides every region dimension cleanly, accumulation
-    # order is preserved → bit_equality. When boundary handling is needed
-    # (any non-clean divide), we downgrade to tolerance_eps. ``unknown``
-    # is the conservative fallback when shape is missing (legacy dossier
-    # without region_shape).
-    if extra.get("clean_divide") is True:
+    # M-37.12 Fix: claimable refinement matches the differential reality.
+    # bit_equality requires BOTH clean_divide AND single K iteration —
+    # multiple K iters reorder accumulation even with clean divides
+    # (verified empirically on tiny_mlp's tile_M4_N16_K16, K_iters=4 →
+    # max_abs ~5.7e-6). When boundary handling is needed (any non-clean
+    # divide) OR when K_iters > 1, downgrade to tolerance_eps.
+    # ``unknown`` is the conservative fallback when shape is missing.
+    if extra.get("clean_divide") is True and extra.get("single_k_iter") is True:
         derived_refinement = "bit_equality"
+    elif extra.get("clean_divide") is True:
+        derived_refinement = "tolerance_eps"  # clean but K_iters > 1
     elif extra.get("clean_divide") is False:
         derived_refinement = "tolerance_eps"
     else:

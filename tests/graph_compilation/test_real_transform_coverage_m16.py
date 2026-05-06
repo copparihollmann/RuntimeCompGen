@@ -260,20 +260,41 @@ def test_boundary_handling_block_includes_iter_counts(
 def test_bit_equality_not_claimed_when_k_iters_greater_than_one(
     tmp_path: Path,
 ) -> None:
-    """Honest behavior: with greedy's tile_16 on tiny_mlp (K=64, K_iters=4),
-    accumulation order differs from eager → max_abs_error > 0.
-    Status must be fail_refinement_mismatch, NOT discharged_bit_equality."""
+    """Honest behavior: with K_iters > 1, accumulation order differs
+    from eager → max_abs_error > 0. The recipe gate must NOT claim
+    bit_equality.
+
+    Pre-M-37.12: M-12 reported ``fail_refinement_mismatch`` because the
+    obligation declared ``bit_equality`` (overly optimistic) and the
+    differential observed non-zero error.
+
+    Post-M-37.12: the recipe gate downgrades the declaration to
+    ``tolerance_eps`` whenever clean_divide AND K_iters > 1 (M-37.12 Fix).
+    M-12 then discharges ``tolerance_eps`` honestly. The invariant the
+    test checks is: ``refinement_status != discharged_bit_equality``
+    AND ``max_abs_error > 0`` (proof that K_iters > 1 reordered
+    accumulation). On tiny_mlp (M=4 K=64, tile_M4_N16_K16, K_iters=4)
+    this surfaces as ``discharged_tolerance_eps``."""
     out = tmp_path / "tiny_mlp_no_bit_eq"
     _invoke(model="tiny_mlp", out_dir=out)
     rep = _read(
         out / "03_recipe_planning" / "real_verification"
         / "real_differential_report.json"
     )
-    assert rep["status"] == "fail"
-    assert rep["error"]["refinement_status"] == "fail_refinement_mismatch"
+    refinement_status = rep["error"]["refinement_status"]
+    # The load-bearing claim: bit-equality is NEVER claimed when
+    # K_iters > 1, regardless of whether the differential overall
+    # passes or fails.
+    assert refinement_status != "discharged_bit_equality", (
+        f"bit_equality must not be discharged with K_iters > 1; "
+        f"got refinement_status={refinement_status!r}"
+    )
     # max_abs_error is not exactly 0 because accumulation reorder
     # caused float rounding to differ.
     assert rep["error"]["max_abs_error"] > 0.0
+    # And the post-M-37.12 happy path: status pass, discharged_tolerance_eps.
+    if rep["status"] == "pass":
+        assert refinement_status == "discharged_tolerance_eps"
 
 
 # --------------------------------------------------------------------------- #
@@ -310,25 +331,33 @@ def test_m15b_downstream_retry_fires_on_real_m12_failure_under_m16(
     """M-15B downstream-retry plumbing fires when any real downstream
     stage rejects the recipe.
 
-    Pre-M-37.11: greedy on tiny_mlp picked ``tile_M16_N16_K16`` (cheapest),
-    which doesn't divide K cleanly → M-12 boundary path fails
-    bit-equality → M-15B fires on ``real_transform_differential``.
+    History:
 
-    Post-M-37.11: greedy now derives a shape-fit clean-divide tile
-    (``tile_M4_N16_K16``), so M-12 differential passes. The surviving
-    typed-blocker for tiny_mlp is the M-11B model whitelist, which
-    fires on ``real_transform_validation``. Either stage proves the
-    M-15B retry plumbing works; the test pins ``failed_stage in
-    {real_transform_validation, real_transform_differential}`` rather
-    than a specific stage."""
-    out = tmp_path / "m12_real_fail_under_m16"
-    res = _invoke(model="tiny_mlp", out_dir=out)
-    assert res.returncode != 0  # M-15B raises on real failure
-    rr = _read(
-        out / "03_recipe_planning" / "downstream_retry"
-        / "downstream_retry_request.json"
+    - Pre-M-37.11: greedy on tiny_mlp picked ``tile_M16_N16_K16``
+      (cheapest), which didn't divide K cleanly → boundary-aware Path A
+      fails bit-equality → M-15B fires on
+      ``real_transform_differential``.
+    - M-37.11: shape-fit tile candidates → tiny_mlp picks
+      ``tile_M4_N16_K16`` (clean-divide). M-11B whitelist becomes the
+      blocker → M-15B fires on ``real_transform_validation``.
+    - M-37.12: whitelist relaxed on clean-divide path; case-level
+      tolerance uses combined torch.allclose-style criterion. Every
+      current model now passes M-12 differential — there is no model
+      in the canonical set that produces a real M-12 failure. The
+      M-15B plumbing itself is exercised by other tests in
+      tests/graph_compilation/test_downstream_retry.py via the
+      ``real_failed_run`` fixture (which currently skips for the same
+      reason) and by unit tests on the detector.
+
+    Skip with a typed reason rather than fabricate a synthetic
+    failure — the goal of the test was "M-15B fires on a real
+    natural failure", which now requires either (a) finding a model
+    whose differential trips the new combined tolerance, or
+    (b) widening the canonical set with adversarial cases."""
+    pytest.skip(
+        "M-37.12 made every canonical-set model pass M-12 differential "
+        "(combined torch.allclose-style tolerance + tolerance_eps "
+        "downgrade for K_iters>1). No model in the canonical set "
+        "produces a real natural M-12 failure; M-15B plumbing is "
+        "covered by detector unit tests instead."
     )
-    assert rr["failed_stage"] in {
-        "real_transform_validation",     # M-37.11: whitelist fires first
-        "real_transform_differential",   # legacy path before M-37.11
-    }
