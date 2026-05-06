@@ -198,8 +198,70 @@ def _reduction_dimension(region: dict[str, Any], tensor_lookup: dict[str, dict[s
     return max(candidates) if candidates else 1
 
 
+_MLIR_TENSOR_RE = re.compile(r"tensor<([0-9x]+)x([a-z0-9]+)>")
+_MLIR_MATMUL_RE = re.compile(
+    r'linalg\.matmul\s+\{[^}]*compgen\.region_id\s*=\s*"([^"]+)"[^}]*\}'
+    r"\s+ins\([^:]*:\s*(tensor<[^>]+>)\s*,\s*(tensor<[^>]+>)\s*\)"
+)
+
+
+def _parse_mlir_tensor_type(text: str) -> tuple[list[int], str]:
+    """Parse ``tensor<8x27xf32>`` into ([8, 27], "f32"). Empty on failure."""
+    m = _MLIR_TENSOR_RE.search(text)
+    if not m:
+        return [], ""
+    dim_str, dtype = m.group(1), m.group(2)
+    try:
+        dims = [int(d) for d in dim_str.split("x") if d]
+    except ValueError:
+        return [], ""
+    return dims, dtype
+
+
+def _shape_from_payload_mlir(
+    region_id: str, payload_path: Path,
+) -> tuple[list[list[int]], list[list[int]], str]:
+    """Parse payload.mlir for ``linalg.matmul`` matching ``region_id``.
+
+    Used as a fallback when the FX-level ``tensor_lookup`` doesn't
+    carry shapes for a region — typical for regions produced by
+    intermediate lowerings (e.g. conv → im2col → matmul where the
+    matmul's tensor metadata is below the FX layer). The shape IS
+    deterministically derivable from the conv's input + kernel +
+    padding + stride; rather than re-running that derivation, we
+    just read the lowered MLIR (which already has the answer).
+
+    Returns (input_shapes, output_shapes, dtype). Empty when the
+    payload is missing, the region isn't matched, or the matmul's
+    K dims don't pair (``ins(MxK, KxN)``).
+    """
+    if not payload_path.exists():
+        return [], [], ""
+    try:
+        text = payload_path.read_text(encoding="utf-8")
+    except OSError:
+        return [], [], ""
+    for match in _MLIR_MATMUL_RE.finditer(text):
+        rid, lhs_t, rhs_t = match.group(1), match.group(2), match.group(3)
+        if rid != region_id:
+            continue
+        lhs_dims, lhs_dtype = _parse_mlir_tensor_type(lhs_t)
+        rhs_dims, _ = _parse_mlir_tensor_type(rhs_t)
+        if (
+            len(lhs_dims) == 2 and len(rhs_dims) == 2
+            and lhs_dims[1] == rhs_dims[0]
+        ):
+            # linalg.matmul: ins(MxK, KxN) outs(MxN)
+            out_dims = [lhs_dims[0], rhs_dims[1]]
+            return [lhs_dims, rhs_dims], [out_dims], lhs_dtype
+    return [], [], ""
+
+
 def _region_shape(
-    region: dict[str, Any], tensor_lookup: dict[str, dict[str, Any]],
+    region: dict[str, Any],
+    tensor_lookup: dict[str, dict[str, Any]],
+    *,
+    run_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Distinctive shape signature for a region (M-37.9 Fix 1).
 
@@ -208,16 +270,20 @@ def _region_shape(
     shapes produce distinct downstream candidate_ids. Returns:
 
       {
-        "input_shapes":  [[M, K], [K, N], ...],   # per input port
+        "input_shapes":  [[M, K], [K, N], ...],
         "output_shapes": [[M, N], ...],
         "kind":          "matmul" | ...,
-        "summary":       "matmul/4x64x128/f32"     # canonical short tag
+        "summary":       "matmul/4x128x64/f32",
+        "source":        "fx_tensor_lookup" | "payload_mlir_fallback"
       }
 
-    For matmul regions the summary embeds (M, N, K) explicitly so
-    downstream consumers can read it directly without re-parsing
-    payload.mlir. Empty shapes (opaque ops, dynamic shapes) yield
-    ``summary: "<kind>/unknown"``.
+    Two-tier extraction:
+
+    1. **FX tensor_lookup** — cheap, in-memory; covers regions lifted
+       directly from torch.export.
+    2. **Payload MLIR fallback** — parses ``linalg.matmul ins/outs``
+       text directly when the FX layer doesn't have the shape (e.g.
+       conv → im2col → matmul). Same answer every run, no laziness.
     """
     def _ports_shapes(ports: list) -> list[list[int]]:
         out: list[list[int]] = []
@@ -237,16 +303,45 @@ def _region_shape(
     outp = _ports_shapes(region.get("outputs", []))
     kind = region.get("kind", "")
     dtype = ""
+    source = "fx_tensor_lookup"
     for port in region.get("inputs", []):
         t = tensor_lookup.get(port.get("tensor_id"))
         if t and t.get("dtype"):
             dtype = str(t["dtype"])
             break
 
+    # MLIR fallback when FX didn't give us a 2-input MxK × KxN matmul.
+    # We fall through in three cases:
+    #   1. Fewer than 2 input shapes recorded (rare).
+    #   2. The first two shapes aren't both rank-2.
+    #   3. The first two shapes are rank-2 but their K dims don't pair
+    #      — typical for conv → im2col → matmul where FX records the
+    #      output buffer + operands in mixed order.
+    fx_pair_invalid = False
+    if kind == "matmul":
+        if len(inp) < 2 or len(inp[0]) != 2 or len(inp[1]) != 2:
+            fx_pair_invalid = True
+        elif inp[0][1] != inp[1][0]:
+            fx_pair_invalid = True
+    if kind == "matmul" and run_dir is not None and fx_pair_invalid:
+        payload_ref = ""
+        for po in region.get("payload_ops", []):
+            if po.get("region_id") == region.get("region_id"):
+                payload_ref = po.get("payload_ref", "")
+                break
+        if payload_ref:
+            inp_mlir, outp_mlir, dtype_mlir = _shape_from_payload_mlir(
+                region.get("region_id", ""), run_dir / payload_ref,
+            )
+            if inp_mlir:
+                inp = inp_mlir
+                outp = outp_mlir
+                if dtype_mlir:
+                    dtype = dtype_mlir
+                source = "payload_mlir_fallback"
+
     summary = f"{kind}/unknown"
     if kind == "matmul" and len(inp) >= 2 and len(inp[0]) == 2 and len(inp[1]) == 2:
-        # ``ins(MxK, KxN)`` — the canonical linalg.matmul shape.
-        # Output should be MxN.
         m, k0 = inp[0]
         k1, n = inp[1]
         if k0 == k1:
@@ -262,6 +357,7 @@ def _region_shape(
         "kind": kind,
         "dtype": dtype,
         "summary": summary,
+        "source": source,
     }
 
 
@@ -876,7 +972,9 @@ def build_region_dossiers(
         # M-37.9 Fix 1: capture actual region shape so downstream
         # candidate_id construction can distinguish two regions named
         # ``matmul_0`` with different shapes across models.
-        region_shape_info = _region_shape(region, tensor_lookup)
+        region_shape_info = _region_shape(
+            region, tensor_lookup, run_dir=run_dir,
+        )
 
         fx_targets = sorted(
             {
