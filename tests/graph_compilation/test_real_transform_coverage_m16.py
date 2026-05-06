@@ -73,12 +73,18 @@ def _invoke(
 def test_previously_blocked_models_now_run_path_a(
     model: str, tmp_path: Path,
 ) -> None:
-    """Greedy picks the cheapest tile (16x16x16) which doesn't divide
-    K cleanly for these models. Pre-M-16: M-12 returned mode=blocked.
-    Post-M-16: mode=executable_real_transform with the boundary-aware
-    evaluator. Bit-equality may not hold (K_iters > 1 reorders sums)
-    — that's reported honestly as fail_refinement_mismatch, but Path A
-    is exercised."""
+    """Pre-M-16: M-12 returned ``mode=blocked`` for these models.
+    Post-M-16: M-12 reaches Path A (mode=executable_real_transform).
+
+    M-37.11 evolution: greedy now derives shape-fit tile candidates
+    and prefers clean-divide tiles over boundary-handled ones (the
+    boundary-aware path is still emitted as a fallback when no clean
+    tile fits). For these three models the shape-fit candidate
+    (``tile_M*_N16_K16`` chosen to divide M and K cleanly) wins, so
+    Path A runs as ``executable_structured_ir`` (the strictly-better
+    refinement). The test still pins Path A; it accepts either
+    real_transform_kind because the goal is "Path A reached", not
+    "boundary path forced"."""
     out = tmp_path / model
     res = _invoke(model=model, out_dir=out)
     # Pipeline raises via M-15B if downstream fails. We don't care
@@ -93,13 +99,19 @@ def test_previously_blocked_models_now_run_path_a(
     assert rep["mode"] == "executable_real_transform", (
         f"{model}: expected Path A, got mode={rep.get('mode')}"
     )
-    assert rep["transform"]["real_transform_kind"] == (
-        "executable_with_boundary_handling"
-    )
+    real_kind = rep["transform"]["real_transform_kind"]
+    assert real_kind in (
+        "executable_structured_ir",            # M-37.11 clean-divide path
+        "executable_with_boundary_handling",   # legacy boundary path
+    ), f"{model}: unexpected real_transform_kind={real_kind!r}"
     bh = rep["boundary_handling"]
-    assert bh["enabled"] is True
-    assert bh["boundary_required"] is True
-    assert bh["full_tiles_seen"] + bh["boundary_tiles_seen"] >= 1
+    if real_kind == "executable_with_boundary_handling":
+        assert bh["enabled"] is True
+        assert bh["boundary_required"] is True
+        assert bh["full_tiles_seen"] + bh["boundary_tiles_seen"] >= 1
+    else:
+        # Clean-divide path: boundary handling is not exercised.
+        assert bh.get("boundary_required") is False
 
 
 def test_merlin_mlp_wide_still_passes_clean_divides_path(
@@ -295,10 +307,20 @@ def test_non_set_tile_params_models_still_blocked_after_m16(
 def test_m15b_downstream_retry_fires_on_real_m12_failure_under_m16(
     tmp_path: Path,
 ) -> None:
-    """M-16 made tile_16 + non-clean K dims a REAL execution path (Path
-    A with boundary handling). When K_iters>1 reorders accumulation,
-    bit-equality fails honestly — and M-15B detects the failure and
-    emits a downstream_retry_request. No test injection."""
+    """M-15B downstream-retry plumbing fires when any real downstream
+    stage rejects the recipe.
+
+    Pre-M-37.11: greedy on tiny_mlp picked ``tile_M16_N16_K16`` (cheapest),
+    which doesn't divide K cleanly → M-12 boundary path fails
+    bit-equality → M-15B fires on ``real_transform_differential``.
+
+    Post-M-37.11: greedy now derives a shape-fit clean-divide tile
+    (``tile_M4_N16_K16``), so M-12 differential passes. The surviving
+    typed-blocker for tiny_mlp is the M-11B model whitelist, which
+    fires on ``real_transform_validation``. Either stage proves the
+    M-15B retry plumbing works; the test pins ``failed_stage in
+    {real_transform_validation, real_transform_differential}`` rather
+    than a specific stage."""
     out = tmp_path / "m12_real_fail_under_m16"
     res = _invoke(model="tiny_mlp", out_dir=out)
     assert res.returncode != 0  # M-15B raises on real failure
@@ -306,4 +328,7 @@ def test_m15b_downstream_retry_fires_on_real_m12_failure_under_m16(
         out / "03_recipe_planning" / "downstream_retry"
         / "downstream_retry_request.json"
     )
-    assert rr["failed_stage"] == "real_transform_differential"
+    assert rr["failed_stage"] in {
+        "real_transform_validation",     # M-37.11: whitelist fires first
+        "real_transform_differential",   # legacy path before M-37.11
+    }

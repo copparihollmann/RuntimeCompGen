@@ -522,10 +522,68 @@ def _output_dtype_size(region: dict[str, Any], tensor_lookup: dict[str, dict[str
     return 4
 
 
+def _shape_fit_dim(d: int, *, max_tile: int = 16) -> int:
+    """Largest divisor of ``d`` that is also <= ``max_tile``.
+
+    M-37.11 (Improvement A): used to derive shape-fit matmul tiles
+    that cleanly divide the region's actual dimensions, breaking the
+    dead-end where the only proposed tiles start at 16 and a region
+    with M=4 has no clean-divide option.
+
+    Walks the standard cache-friendly sizes (16, 8, 4, 2, 1) and picks
+    the largest that divides ``d``. For composite ``d`` this finds
+    a useful tile; for prime ``d`` it returns 1 (caller can choose to
+    skip). Returns ``d`` itself when ``d <= max_tile`` (use the whole
+    dim — a single tile, no boundary).
+    """
+    if d <= 0:
+        return 0
+    if d <= max_tile:
+        return d
+    for v in (16, 8, 4, 2, 1):
+        if v <= max_tile and d % v == 0:
+            return v
+    return 1
+
+
+def _shape_fit_tile_for_matmul(
+    shape_info: dict[str, Any],
+    *,
+    max_tile: int = 16,
+) -> dict[str, int] | None:
+    """Derive a clean-divide matmul tile from a region's actual shape.
+
+    Returns ``None`` when the shape is unknown, when any dim is too
+    small to be useful (< 2), or when the resulting tile is degenerate
+    (any dim == 1). The candidate proposer skips degenerate tiles —
+    a (M=7, N=1, K=1) tile is not a useful action.
+    """
+    if not shape_info or shape_info.get("kind") != "matmul":
+        return None
+    inp = shape_info.get("input_shapes") or []
+    if (
+        len(inp) < 2
+        or len(inp[0]) != 2
+        or len(inp[1]) != 2
+        or inp[0][1] != inp[1][0]
+    ):
+        return None
+    M, K = inp[0]
+    _, N = inp[1]
+    tM = _shape_fit_dim(M, max_tile=max_tile)
+    tN = _shape_fit_dim(N, max_tile=max_tile)
+    tK = _shape_fit_dim(K, max_tile=max_tile)
+    if tM < 2 or tN < 2 or tK < 2:
+        return None
+    return {"M": tM, "N": tN, "K": tK}
+
+
 def _working_set_curve(
     region: dict[str, Any],
     profile: TargetProfile,
     tensor_lookup: dict[str, dict[str, Any]],
+    *,
+    region_shape: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     kind = region["kind"]
     if _is_opaque_kind(kind) or kind in _ALLOCATOR_KINDS or kind == "unknown":
@@ -533,10 +591,29 @@ def _working_set_curve(
     dtype_size = _output_dtype_size(region, tensor_lookup)
     curve: list[dict[str, Any]] = []
     if _is_matmul_like(kind):
-        for tile in profile.working_set_tiles_matmul:
+        # M-37.11 Improvement A: append a shape-fit tile when the
+        # region's actual M/N/K are known and the standard profile
+        # tiles all force boundary handling. The shape-fit tile is
+        # guaranteed to cleanly divide every region dim it covers
+        # (whole-dim when dim < max_tile, largest divisor otherwise).
+        # Composite shapes get a clean-divide option; prime shapes
+        # honestly stay boundary-only.
+        seen_tiles: set[tuple[int, int, int]] = set()
+        all_tiles = list(profile.working_set_tiles_matmul)
+        if region_shape:
+            shape_fit = _shape_fit_tile_for_matmul(region_shape)
+            if shape_fit is not None:
+                # Prepend so it surfaces first in the curve (smallest
+                # cache footprint typically).
+                all_tiles = [shape_fit] + all_tiles
+        for tile in all_tiles:
             M = int(tile.get("M", 0))
             N = int(tile.get("N", 0))
             K = int(tile.get("K", 0))
+            key = (M, N, K)
+            if key in seen_tiles:
+                continue
+            seen_tiles.add(key)
             live_bytes = (M * K + K * N + M * N) * dtype_size
             curve.append(
                 {
@@ -964,17 +1041,20 @@ def build_region_dossiers(
             "reuse": reuse,
             "numerical_sensitivity": sensitivity,
         }
-        wsc = _working_set_curve(region, profile, tensor_lookup)
+        # M-37.9 Fix 1 / M-37.11 Improvement A: compute region_shape
+        # FIRST so the working_set_curve can derive shape-fit tiles
+        # that cleanly divide the region's actual dimensions.
+        region_shape_info = _region_shape(
+            region, tensor_lookup, run_dir=run_dir,
+        )
+        wsc = _working_set_curve(
+            region, profile, tensor_lookup,
+            region_shape=region_shape_info,
+        )
         placement = _placement_envelope(region, profile, cost)
         partial["working_set_curve"] = wsc
         partial["placement_envelope"] = placement
         legality = _legality_constraints(region, partial)
-        # M-37.9 Fix 1: capture actual region shape so downstream
-        # candidate_id construction can distinguish two regions named
-        # ``matmul_0`` with different shapes across models.
-        region_shape_info = _region_shape(
-            region, tensor_lookup, run_dir=run_dir,
-        )
 
         fx_targets = sorted(
             {
