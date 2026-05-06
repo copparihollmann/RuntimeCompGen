@@ -67,16 +67,31 @@ def render_markdown(pack: AblationPack) -> str:
     lines.append("")
     lines.append("## Per-mode summary")
     lines.append("")
-    lines.append("| Mode | Cells | Verified | Typed-blocked | Error | Mean decision seconds |")
-    lines.append("| --- | --- | --- | --- | --- | --- |")
+    lines.append("| Mode | Cells | Verified | Typed-blocked | Error | "
+                 "Promoted hits | Mean decision seconds |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- |")
     for mode in summary["modes"]:
         row = summary["per_mode"][mode]
         lines.append(
             f"| `{mode}` | {row['cell_count']} | {row['verified']} | "
             f"{row['typed_blocked']} | {row['error']} | "
+            f"{row['promoted_hit_count']} / {row['promoted_candidates_total']} | "
             f"{row['mean_decision_seconds']:.2f} |"
         )
     lines.append("")
+    if summary.get("promoted_hit_count_total", 0) > 0 or any(
+        row.get("promoted_candidates_total", 0) > 0
+        for row in summary.get("per_mode", {}).values()
+    ):
+        lines.append("## Warm-cache effectiveness (M-37.2)")
+        lines.append("")
+        lines.append(
+            f"- **Promoted hits**: "
+            f"{summary['promoted_hit_count_total']} / {summary['cell_count']} "
+            f"cells ({summary['promoted_hit_rate']:.1%}) saw the agent pick "
+            f"a candidate that matched a promoted recipe."
+        )
+        lines.append("")
     lines.append("## Per-cell details")
     lines.append("")
     lines.append("| Model | Mode | Selected candidate | Pass | Outcome |")

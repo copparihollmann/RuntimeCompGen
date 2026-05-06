@@ -68,6 +68,8 @@ class AblationResult:
     decision_seconds: float
     typed_outcome: str  # verified | typed_blocked | error
     error: str = ""
+    promoted_candidates_count: int = 0  # M-37.2: M-28 candidates surfaced in the request
+    promoted_hit: bool = False  # M-37.2: agent's pick matched a promoted candidate
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,6 +84,8 @@ class AblationResult:
             "decision_seconds": self.decision_seconds,
             "typed_outcome": self.typed_outcome,
             "error": self.error,
+            "promoted_candidates_count": self.promoted_candidates_count,
+            "promoted_hit": self.promoted_hit,
         }
 
 
@@ -212,6 +216,35 @@ def run_one_cell(
     cid, kind = _extract_response(out_dir) if raised is None else ("", "")
     overall, failures = _extract_validation(out_dir) if raised is None else ("unknown", ())
 
+    # M-37.2: promoted-candidates count + promoted-hit detection. The
+    # request carries a promoted_candidates list; if the agent's pick
+    # matches one (by candidate_id or recipe_id), record a hit. This
+    # is the warm-cache effectiveness metric the M-30 efficiency
+    # report measured at run-level; M-37.2 measures it at decision-
+    # level (per cell) so the ablation can attribute hits to modes.
+    promoted_count = 0
+    promoted_hit = False
+    if raised is None:
+        request_path = (
+            out_dir / "03_recipe_planning" / "agent_decision"
+            / "agent_decision_request.json"
+        )
+        if request_path.exists():
+            try:
+                req = json.loads(request_path.read_text(encoding="utf-8"))
+                promoted = req.get("promoted_candidates") or []
+                promoted_count = len(promoted)
+                if cid:
+                    for pc in promoted:
+                        if (
+                            pc.get("candidate_id") == cid
+                            or pc.get("recipe_id") == cid
+                        ):
+                            promoted_hit = True
+                            break
+            except (json.JSONDecodeError, OSError):
+                pass
+
     return AblationResult(
         model_id=model_id,
         target_id=target_id,
@@ -224,6 +257,8 @@ def run_one_cell(
         decision_seconds=elapsed,
         typed_outcome=typed_outcome,
         error=error_text,
+        promoted_candidates_count=promoted_count,
+        promoted_hit=promoted_hit,
     )
 
 
@@ -265,7 +300,7 @@ class AblationPack:
         cells = self.cells
         modes = sorted({c.mode for c in cells})
         models = sorted({c.model_id for c in cells})
-        per_mode: dict[str, dict[str, int]] = {}
+        per_mode: dict[str, dict[str, Any]] = {}
         for m in modes:
             mode_cells = [c for c in cells if c.mode == m]
             per_mode[m] = {
@@ -285,6 +320,13 @@ class AblationPack:
                     sum(c.decision_seconds for c in mode_cells) / len(mode_cells)
                     if mode_cells else 0.0
                 ),
+                # M-37.2: warm-cache effectiveness per mode.
+                "promoted_candidates_total": sum(
+                    c.promoted_candidates_count for c in mode_cells
+                ),
+                "promoted_hit_count": sum(
+                    1 for c in mode_cells if c.promoted_hit
+                ),
             }
         return {
             "modes": modes,
@@ -292,6 +334,12 @@ class AblationPack:
             "cell_count": len(cells),
             "per_mode": per_mode,
             "divergence_count": len(self.divergences()),
+            # M-37.2: rolled-up across all cells.
+            "promoted_hit_count_total": sum(1 for c in cells if c.promoted_hit),
+            "promoted_hit_rate": (
+                sum(1 for c in cells if c.promoted_hit) / len(cells)
+                if cells else 0.0
+            ),
         }
 
     def to_dict(self) -> dict[str, Any]:
