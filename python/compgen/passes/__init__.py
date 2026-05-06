@@ -31,23 +31,29 @@ from __future__ import annotations
 from compgen.passes.cards import (
     PASS_FAMILIES,
     PASS_LEVELS,
+    PASS_SOURCES,
     REFINEMENT_KINDS,
     PassCard,
     PassCardError,
     PassCardRegistry,
+    default_registry_root,
     iter_cards,
     load_card,
+    resolve_card_path,
     validate_card,
 )
 
 __all__ = [
     "PASS_FAMILIES",
     "PASS_LEVELS",
+    "PASS_SOURCES",
     "REFINEMENT_KINDS",
     "PassCard",
     "PassCardError",
     "PassCardRegistry",
+    "default_registry_root",
     "iter_cards",
     "load_card",
+    "resolve_card_path",
     "validate_card",
 ]

@@ -78,6 +78,7 @@ PASS_FAMILIES: tuple[str, ...] = (
     "fusion",
     "tiling",
     "layout",
+    "layout_pipeline",  # the multi-step layout suite under transforms/layout/
     "quant",
     "dispatch",
     "codegen",
@@ -86,6 +87,23 @@ PASS_FAMILIES: tuple[str, ...] = (
     "promote",
     "scheduling",
     "memory",
+    "eqsat",  # e-graph rule modules under eqsat/rules/
+    "event_tensor",  # paper-defined event-tensor scheduling passes
+    "fx_graph",  # FX-level decomposition passes
+)
+
+# Recognized provenance buckets. ``""`` (default) is acceptable for
+# passes whose lineage is unclear; the realness audit flags it.
+PASS_SOURCES: tuple[str, ...] = (
+    "",
+    "XLA",
+    "IREE",
+    "hexagon-mlir",
+    "Event Tensor Compiler",
+    "Triton",
+    "torch.inductor",
+    "autocomp",
+    "homemade",
 )
 
 REFINEMENT_KINDS: tuple[str, ...] = (
@@ -129,6 +147,8 @@ class PassCard:
     mcp_tool: str = ""
     example_invocation: dict[str, Any] = field(default_factory=dict)
     notes: str = ""
+    source: str = ""  # M-33.6: provenance bucket from PASS_SOURCES
+    impl_path: str = ""  # M-33.6: relative path to the source-file impl
     source_path: Path | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -149,6 +169,8 @@ class PassCard:
             "mcp_tool": self.mcp_tool,
             "example_invocation": dict(self.example_invocation),
             "notes": self.notes,
+            "source": self.source,
+            "impl_path": self.impl_path,
         }
 
     @classmethod
@@ -171,6 +193,8 @@ class PassCard:
                 mcp_tool=str(data.get("mcp_tool", "")),
                 example_invocation=dict(data.get("example_invocation") or {}),
                 notes=str(data.get("notes", "")),
+                source=str(data.get("source", "")),
+                impl_path=str(data.get("impl_path", "")),
                 source_path=source_path,
             )
         except KeyError as exc:
@@ -247,12 +271,19 @@ def load_card(path: Path) -> PassCard:
 
 
 def iter_cards(root: Path) -> Iterator[PassCard]:
-    """Yield every pass card under ``root`` (sorted by pass_id)."""
+    """Yield every pass card under ``root`` (sorted by pass_id).
+
+    M-33.6: scan recursively. Cards may live in ``<root>/<family>/<id>.yaml``
+    so the directory tree doubles as taxonomy documentation. Files
+    whose name starts with ``_`` are skipped (private fixtures).
+    Files with leading ``_`` in any path component are also skipped
+    so the convention is hierarchical.
+    """
     if not root.exists():
         return
     cards: list[PassCard] = []
-    for path in sorted(root.glob("*.yaml")):
-        if path.name.startswith("_"):
+    for path in sorted(root.rglob("*.yaml")):
+        if any(part.startswith("_") for part in path.relative_to(root).parts):
             continue
         cards.append(load_card(path))
     cards.sort(key=lambda c: c.pass_id)
@@ -370,3 +401,26 @@ class PassCardRegistry:
 def default_registry_root() -> Path:
     """Repo-rooted default registry location."""
     return Path(__file__).resolve().parents[3] / "docs" / "generated" / "pass_cards"
+
+
+def resolve_card_path(pass_id: str, root: Path | None = None) -> Path:
+    """Locate the on-disk YAML for ``pass_id`` under the recursive tree.
+
+    Tests and code that previously did ``root / f"{pass_id}.yaml"`` now
+    use this so the family-subdirectory layout is invisible to callers.
+    Raises :class:`PassCardError` if no card matches.
+    """
+    root = root or default_registry_root()
+    matches = [
+        p for p in root.rglob(f"{pass_id}.yaml")
+        if not any(part.startswith("_") for part in p.relative_to(root).parts)
+    ]
+    if not matches:
+        raise PassCardError(
+            f"no pass card found for pass_id {pass_id!r} under {root}"
+        )
+    if len(matches) > 1:
+        raise PassCardError(
+            f"multiple pass cards match pass_id {pass_id!r}: {matches}"
+        )
+    return matches[0]
