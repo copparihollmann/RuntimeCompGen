@@ -198,6 +198,73 @@ def _reduction_dimension(region: dict[str, Any], tensor_lookup: dict[str, dict[s
     return max(candidates) if candidates else 1
 
 
+def _region_shape(
+    region: dict[str, Any], tensor_lookup: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Distinctive shape signature for a region (M-37.9 Fix 1).
+
+    Captures the *actual* tensor shapes the region operates on so two
+    regions named ``matmul_0`` in different models with different
+    shapes produce distinct downstream candidate_ids. Returns:
+
+      {
+        "input_shapes":  [[M, K], [K, N], ...],   # per input port
+        "output_shapes": [[M, N], ...],
+        "kind":          "matmul" | ...,
+        "summary":       "matmul/4x64x128/f32"     # canonical short tag
+      }
+
+    For matmul regions the summary embeds (M, N, K) explicitly so
+    downstream consumers can read it directly without re-parsing
+    payload.mlir. Empty shapes (opaque ops, dynamic shapes) yield
+    ``summary: "<kind>/unknown"``.
+    """
+    def _ports_shapes(ports: list) -> list[list[int]]:
+        out: list[list[int]] = []
+        for port in ports or []:
+            t = tensor_lookup.get(port.get("tensor_id"))
+            if not t:
+                continue
+            shape = [
+                int(d) for d in t.get("shape", [])
+                if isinstance(d, int) and d > 0
+            ]
+            if shape:
+                out.append(shape)
+        return out
+
+    inp = _ports_shapes(region.get("inputs", []))
+    outp = _ports_shapes(region.get("outputs", []))
+    kind = region.get("kind", "")
+    dtype = ""
+    for port in region.get("inputs", []):
+        t = tensor_lookup.get(port.get("tensor_id"))
+        if t and t.get("dtype"):
+            dtype = str(t["dtype"])
+            break
+
+    summary = f"{kind}/unknown"
+    if kind == "matmul" and len(inp) >= 2 and len(inp[0]) == 2 and len(inp[1]) == 2:
+        # ``ins(MxK, KxN)`` — the canonical linalg.matmul shape.
+        # Output should be MxN.
+        m, k0 = inp[0]
+        k1, n = inp[1]
+        if k0 == k1:
+            summary = f"matmul/{m}x{n}x{k0}" + (f"/{dtype}" if dtype else "")
+    elif outp and outp[0]:
+        summary = f"{kind}/" + "x".join(str(d) for d in outp[0]) + (
+            f"/{dtype}" if dtype else ""
+        )
+
+    return {
+        "input_shapes": inp,
+        "output_shapes": outp,
+        "kind": kind,
+        "dtype": dtype,
+        "summary": summary,
+    }
+
+
 def _kind_multiplier(kind: str) -> float:
     """Convert raw ``K * unit_roundoff`` to ``eps_out`` per op family."""
     if kind in {"matmul", "conv"}:
@@ -806,6 +873,10 @@ def build_region_dossiers(
         partial["working_set_curve"] = wsc
         partial["placement_envelope"] = placement
         legality = _legality_constraints(region, partial)
+        # M-37.9 Fix 1: capture actual region shape so downstream
+        # candidate_id construction can distinguish two regions named
+        # ``matmul_0`` with different shapes across models.
+        region_shape_info = _region_shape(region, tensor_lookup)
 
         fx_targets = sorted(
             {
@@ -840,6 +911,10 @@ def build_region_dossiers(
             "working_set_curve": wsc,
             "placement_envelope": placement,
             "legality_constraints": legality,
+            # M-37.9 Fix 1: actual region shape, used by action_space
+            # candidate_id construction to disambiguate same-named
+            # regions across models.
+            "region_shape": region_shape_info,
         }
 
         fname = _safe_filename(rid)
