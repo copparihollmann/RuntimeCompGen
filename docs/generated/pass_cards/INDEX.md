@@ -1,6 +1,6 @@
 # CompGen pass card index
 
-_Generated: `2026-05-06T03:53:48Z`_
+_Generated: `2026-05-06T04:20:03Z`_
 
 **60 cards** across 12 families.
 

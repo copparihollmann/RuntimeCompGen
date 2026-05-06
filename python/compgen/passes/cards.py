@@ -106,6 +106,74 @@ PASS_SOURCES: tuple[str, ...] = (
     "homemade",
 )
 
+# M-34.1: pass phases. Five-stage ordered pipeline the LLM cannot
+# reorder. Phase boundaries are deterministic; passes can only run
+# in their declared phase. The order is strict:
+#
+#     canonicalize  →  analyze  →  optimize  →  verify  →  emit
+#
+# A phase-N pass cannot run while any phase-M pass (M < N) is still
+# pending.
+PASS_PHASES: tuple[str, ...] = (
+    "canonicalize",
+    "analyze",
+    "optimize",
+    "verify",
+    "emit",
+)
+_PHASE_ORDER: dict[str, int] = {p: i for i, p in enumerate(PASS_PHASES)}
+
+
+def phase_index(phase: str) -> int:
+    """Strict ordering index for ``phase``. Raises on unknown phase."""
+    if phase not in _PHASE_ORDER:
+        raise PassCardError(
+            f"unknown phase {phase!r}; must be one of {PASS_PHASES}"
+        )
+    return _PHASE_ORDER[phase]
+
+
+def default_phase_for_family(family: str) -> str:
+    """Conservative default: derive phase from family.
+
+    M-34.1 default policy:
+      - canonicalize family       → canonicalize phase
+      - fx_graph                  → canonicalize (FX is upstream of payload)
+      - layout, layout_pipeline   → optimize
+      - tiling, fusion, quant     → optimize
+      - eqsat                     → optimize
+      - scheduling, memory        → emit
+      - codegen                   → emit
+      - event_tensor              → emit
+      - verify                    → verify
+      - profile, dispatch         → analyze
+      - promote                   → emit (post-verify)
+
+    A card may override its phase explicitly; this function is the
+    fallback when the YAML does not declare ``phase``.
+    """
+    return _DEFAULT_PHASE_BY_FAMILY.get(family, "optimize")
+
+
+_DEFAULT_PHASE_BY_FAMILY: dict[str, str] = {
+    "canonicalize": "canonicalize",
+    "fx_graph": "canonicalize",
+    "layout": "optimize",
+    "layout_pipeline": "optimize",
+    "tiling": "optimize",
+    "fusion": "optimize",
+    "quant": "optimize",
+    "eqsat": "optimize",
+    "scheduling": "emit",
+    "memory": "emit",
+    "codegen": "emit",
+    "event_tensor": "emit",
+    "verify": "verify",
+    "profile": "analyze",
+    "dispatch": "analyze",
+    "promote": "emit",
+}
+
 REFINEMENT_KINDS: tuple[str, ...] = (
     "bit_equality",
     "tolerance_eps",
@@ -149,6 +217,9 @@ class PassCard:
     notes: str = ""
     source: str = ""  # M-33.6: provenance bucket from PASS_SOURCES
     impl_path: str = ""  # M-33.6: relative path to the source-file impl
+    phase: str = ""  # M-34.1: phase from PASS_PHASES (default derived from family)
+    requires_after: tuple[str, ...] = ()  # M-34.2: pair contract — these passes must run after self
+    excludes: tuple[str, ...] = ()  # M-34.2: mutual exclusion in a single plan
     source_path: Path | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -171,7 +242,20 @@ class PassCard:
             "notes": self.notes,
             "source": self.source,
             "impl_path": self.impl_path,
+            "phase": self.effective_phase(),
+            "requires_after": list(self.requires_after),
+            "excludes": list(self.excludes),
         }
+
+    def effective_phase(self) -> str:
+        """Return the declared phase, falling back to the family default.
+
+        M-34.1: a card may declare ``phase`` explicitly; otherwise we
+        derive it from ``family`` via :func:`default_phase_for_family`.
+        Cards that need an exception (e.g. a fusion-family pass that
+        actually runs in canonicalize) just author the field.
+        """
+        return self.phase or default_phase_for_family(self.family)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], *, source_path: Path | None = None) -> PassCard:
@@ -195,6 +279,9 @@ class PassCard:
                 notes=str(data.get("notes", "")),
                 source=str(data.get("source", "")),
                 impl_path=str(data.get("impl_path", "")),
+                phase=str(data.get("phase", "")),
+                requires_after=tuple(data.get("requires_after") or ()),
+                excludes=tuple(data.get("excludes") or ()),
                 source_path=source_path,
             )
         except KeyError as exc:
@@ -252,6 +339,15 @@ def validate_card(card: PassCard) -> None:
         raise PassCardError(
             f"pass card {card.pass_id}: cost {card.cost!r} must be in {COST_KINDS}"
         )
+    # M-34.1: phase must resolve to a known value (declared or
+    # family-default). The default-from-family helper raises if family
+    # is unknown.
+    if card.phase and card.phase not in PASS_PHASES:
+        raise PassCardError(
+            f"pass card {card.pass_id}: phase {card.phase!r} must be in {PASS_PHASES}"
+        )
+    # The effective phase is always one of PASS_PHASES (default-from-family).
+    _ = card.effective_phase()  # raises via default_phase_for_family if unknown family
     _check_non_empty_list("preconditions", card.preconditions, source=card.source_path)
     _check_non_empty_list("invalidates", card.invalidates, source=card.source_path)
     _check_non_empty_list("failure_modes", card.failure_modes, source=card.source_path)
@@ -396,6 +492,22 @@ class PassCardRegistry:
         """Return cards in the order requested (must already be resolvable)."""
         self.assert_resolvable(list(pass_ids))
         return [self.cards[p] for p in pass_ids]
+
+    def cards_in_phase(self, phase: str) -> list[PassCard]:
+        """Return all cards whose effective_phase == ``phase`` (M-34.1)."""
+        if phase not in PASS_PHASES:
+            raise PassCardError(
+                f"phase {phase!r} must be one of {PASS_PHASES}"
+            )
+        return sorted(
+            (c for c in self.cards.values() if c.effective_phase() == phase),
+            key=lambda c: c.pass_id,
+        )
+
+    def phases_present(self) -> list[str]:
+        """Return phases (in canonical order) that have at least one card."""
+        used = {c.effective_phase() for c in self.cards.values()}
+        return [p for p in PASS_PHASES if p in used]
 
 
 def default_registry_root() -> Path:
