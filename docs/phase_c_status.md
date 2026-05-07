@@ -1,6 +1,6 @@
 # Phase C — Status
 
-_Last updated: 2026-05-07_  ·  _Current head: `62a2bc6`_  ·  _Trust report: `/tmp/m45_trust/trust_report.md` (8/8 PASS at `ea69e04`, 23 contracts)_
+_Last updated: 2026-05-07_  ·  _Current head: `0c80c28`_  ·  _Trust report: `/tmp/m46_trust/trust_report.md` (8/8 PASS at `62a2bc6`, 24 contracts)_
 
 This is the canonical Phase C tracker. Every Phase C milestone's done
 condition includes updating this document with the new commit hash,
@@ -49,7 +49,7 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 | M-43  | Provider response schema + commit tool + 4 MCP tools | complete | `0df601b` | `python/compgen/graph_compilation/kernel_codegen_response.py`, `python/compgen/mcp/tools/kernel_codegen.py`, `tests/graph_compilation/test_kernel_codegen_response.py`, `docs/realness/m43_provider_response.yaml` | 14 (M-43), real-driven 4-phase end-to-end provider loop on merlin_mlp_wide (1 bug surfaced + fixed) |
 | M-44  | Contract-driven verifier checklist (LOAD-BEARING) | complete | `ea69e04` | `python/compgen/kernels/contract_verifier.py`, `graph_compilation/kernel_codegen_response.py` (M-44 hook + reconstruct_contract), `tests/kernels/test_contract_verifier.py`, `docs/realness/m44_contract_driven_verifier.yaml` | 12 (M-44), 46 across M-40..M-44, real-driven stress: 5/5 models verified end-to-end, tampered shape correctly typed |
 | M-45  | Kernel certificate                            | complete    | `62a2bc6` | `python/compgen/kernels/kernel_certificate.py`, `graph_compilation/kernel_codegen_response.py` (M-45 hook on verified path), `mcp/tools/kernel_codegen.py` (inspect surfaces cert + validation), `tests/kernels/test_kernel_certificate.py`, `docs/realness/m45_kernel_certificate.yaml` | 12 (M-45) + 46 from M-40..M-44 (58 total kernel-track tests), 5/5 models emit cert + validate; tamper → typed artifact_hash_drift |
-| M-46  | Plan ↔ certified-kernels link                 | complete    | _pending_ | `python/compgen/runtime/execution_plan.py` (RegionKernelBinding + validate_with_run_dir), `python/compgen/graph_compilation/execution_plan_emit.py`, `run.py` + `__main__.py` (boundary + flag), `tests/runtime/test_region_kernel_binding.py`, `docs/realness/m46_plan_kernel_binding.yaml` | 10 (M-46) + 12 (M-45), 5/5 models flip unbound→bound on cert emit, tamper → typed artifact_hash_drift |
+| M-46  | Plan ↔ certified-kernels link                 | complete    | `0c80c28` | `python/compgen/runtime/execution_plan.py` (RegionKernelBinding + validate_with_run_dir), `python/compgen/graph_compilation/execution_plan_emit.py`, `run.py` + `__main__.py` (boundary + flag), `tests/runtime/test_region_kernel_binding.py`, `docs/realness/m46_plan_kernel_binding.yaml` | 10 (M-46) + 12 (M-45), 5/5 models flip unbound→bound on cert emit, tamper → typed artifact_hash_drift |
 | M-47  | Python SYNC plan executor                     | planned     | —       | —                                                                                     | —          |
 | M-48  | Runtime plan assertions                       | planned     | —       | —                                                                                     | —          |
 | M-49  | Glue differential — paper-facing              | planned     | —       | —                                                                                     | —          |
@@ -79,6 +79,7 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 
 Append-only log of full Phase C audit runs (commit + verdict + run path).
 
+- `0c80c28` (2026-05-07, M-46 commit): trust report 8/8 PASS at `/tmp/m46_trust/trust_report.md` (24 contracts, 4 caveats, 9 negative controls). Real-driven stress: phase 1 (no provider) all 6 models unbound; phase 2 (with provider) 5/5 set_tile_params flip to bound; phase 3 (tamper) artifact_hash_drift fires. 22 tests across M-45+M-46.
 - `62a2bc6` (2026-05-07, M-45 commit): trust report 8/8 PASS at `/tmp/m45_trust/trust_report.md` (23 contracts, 4 caveats, 9 negative controls). Real-driven stress: 5/5 models emit certificate; paper_claimable=True (no fallback); tamper test (edit kernel.c post-cert) → typed `artifact_hash_drift`. 58 tests across M-40..M-45 pass.
 - `ea69e04` (2026-05-07, M-44 commit): trust report 8/8 PASS at `/tmp/m44_trust/trust_report.md` (22 contracts, 4 caveats, 9 negative controls). Real-driven stress: 5/5 models verified end-to-end with 16 typed obligations each; tamper test (wrong shape) → typed shape_mismatch + retry. 46 tests across M-40..M-44 pass.
 - `0df601b` (2026-05-07, M-43 commit): trust report 8/8 PASS at `/tmp/m43_trust/trust_report.md` (21 contracts, 4 caveats, 9 negative controls). Real-driven stress: 4-phase end-to-end provider loop on merlin_mlp_wide (invalid JSON → schema_invalid+retry; contract_hash mismatch → fatal; sandbox escape → fatal; well-formed → accepted+verifier_pending). 1 bug surfaced + fixed.
