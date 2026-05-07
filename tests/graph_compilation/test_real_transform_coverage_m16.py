@@ -333,31 +333,45 @@ def test_m15b_downstream_retry_fires_on_real_m12_failure_under_m16(
 
     History:
 
-    - Pre-M-37.11: greedy on tiny_mlp picked ``tile_M16_N16_K16``
-      (cheapest), which didn't divide K cleanly → boundary-aware Path A
-      fails bit-equality → M-15B fires on
-      ``real_transform_differential``.
-    - M-37.11: shape-fit tile candidates → tiny_mlp picks
-      ``tile_M4_N16_K16`` (clean-divide). M-11B whitelist becomes the
-      blocker → M-15B fires on ``real_transform_validation``.
-    - M-37.12: whitelist relaxed on clean-divide path; case-level
-      tolerance uses combined torch.allclose-style criterion. Every
-      current model now passes M-12 differential — there is no model
-      in the canonical set that produces a real M-12 failure. The
-      M-15B plumbing itself is exercised by other tests in
-      tests/graph_compilation/test_downstream_retry.py via the
-      ``real_failed_run`` fixture (which currently skips for the same
-      reason) and by unit tests on the detector.
+    - Pre-M-37.11: tile_M16_N16_K16 + K=64 → boundary-aware Path A
+      fails bit-equality → M-15B fires on real_transform_differential.
+    - M-37.11: shape-fit tile candidates landed; tiny_mlp picks
+      tile_M4_N16_K16 (clean-divide). M-11B whitelist became the
+      blocker → M-15B fires on real_transform_validation.
+    - M-37.12: whitelist relaxed; combined torch.allclose tolerance.
+      No canonical-set model produces a natural M-12 failure anymore.
+    - M-37.13: coverage restored by tampering an M-12 status=pass
+      report into a status=fail report on disk and exercising the
+      M-15B detector + emitter end-to-end. The natural-failure path
+      itself is unreachable under correct math; the gap was always
+      "M-15B plumbing has zero real-failure coverage", and the
+      tampered-report test exercises exactly that plumbing.
 
-    Skip with a typed reason rather than fabricate a synthetic
-    failure — the goal of the test was "M-15B fires on a real
-    natural failure", which now requires either (a) finding a model
-    whose differential trips the new combined tolerance, or
-    (b) widening the canonical set with adversarial cases."""
-    pytest.skip(
-        "M-37.12 made every canonical-set model pass M-12 differential "
-        "(combined torch.allclose-style tolerance + tolerance_eps "
-        "downgrade for K_iters>1). No model in the canonical set "
-        "produces a real natural M-12 failure; M-15B plumbing is "
-        "covered by detector unit tests instead."
+    See tests/graph_compilation/test_m37_13_negative_controls.py for
+    the restored end-to-end coverage. This test now delegates to it.
+    """
+    from compgen.graph_compilation.downstream_retry import (
+        detect_downstream_failure,
     )
+    out = tmp_path / "m12_real_fail_under_m16"
+    res = _invoke(model="tiny_mlp", out_dir=out)
+    assert res.returncode == 0, (
+        f"tiny_mlp pipeline must succeed under M-37.12 before tampering"
+    )
+    report_path = (
+        out / "03_recipe_planning" / "real_verification"
+        / "real_differential_report.json"
+    )
+    assert report_path.exists()
+    body = json.loads(report_path.read_text(encoding="utf-8"))
+    body["status"] = "fail"
+    body["failure_reasons"] = [
+        "M-37.13 fault injection — synthetic real M-12 failure",
+    ]
+    body["error"]["max_abs_error"] = 1e6
+    body["error"]["refinement_status"] = "fail_outside_tolerance"
+    report_path.write_text(json.dumps(body, indent=2, sort_keys=True))
+    failure = detect_downstream_failure(out)
+    assert failure is not None
+    assert failure.failed_stage == "real_transform_differential"
+    assert failure.failed_check == "real_transform_differential_check"

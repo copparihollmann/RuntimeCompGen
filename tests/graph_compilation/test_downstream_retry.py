@@ -199,21 +199,59 @@ def test_attempt_000_snapshot_preserves_failed_state(
 
 
 def test_pipeline_exits_non_zero_on_downstream_failure(tmp_path: Path) -> None:
-    """Exit code is observable per-invocation; needs a fresh run rather
-    than the cached fixture (which captured the result already).
+    """Exit code is observable per-invocation; needs a fresh run.
 
-    Post-M-37.12: tiny_mlp now passes M-12 (combined torch.allclose
-    tolerance + tolerance_eps downgrade for K_iters>1). Skipping for
-    the same reason as ``test_m15b_downstream_retry_fires_...`` —
-    no canonical-set model produces a real M-12 failure anymore."""
-    out = tmp_path / "exit"
+    M-37.13: under combined torch.allclose tolerance no canonical-set
+    model produces a natural M-12 failure, so the original tiny_mlp
+    natural-failure assertion is unreachable. Instead we exercise the
+    same code path by:
+      1. Running pipeline successfully on tiny_mlp.
+      2. Tampering the M-12 report on disk to status=fail.
+      3. Calling the same M-15B detection + raise path
+         ``run.py:1251`` would invoke at the boundary.
+
+    This restores the load-bearing invariant the original test
+    asserted: a real M-12 status=fail produces non-zero exit AND
+    emits the typed M-15B retry surface."""
+    from compgen.graph_compilation.downstream_retry import (
+        detect_downstream_failure, emit_downstream_retry_request,
+    )
+    out = tmp_path / "exit_synthetic_fail"
     res = _invoke(out_dir=out, model="tiny_mlp")
-    if res.returncode == 0:
-        pytest.skip(
-            "tiny_mlp now passes M-12 post-M-37.12; need a model that "
-            "still trips M-15B to exercise non-zero exit"
-        )
-    assert "M-15B downstream-gate rejection" in res.stderr
+    assert res.returncode == 0, (
+        f"tiny_mlp must succeed under M-37.12 prior to tampering; "
+        f"stderr={res.stderr!r}"
+    )
+    rep_path = (
+        out / "03_recipe_planning" / "real_verification"
+        / "real_differential_report.json"
+    )
+    body = json.loads(rep_path.read_text(encoding="utf-8"))
+    body["status"] = "fail"
+    body["failure_reasons"] = [
+        "M-37.13 fault injection — synthetic real M-12 failure",
+    ]
+    body["error"]["max_abs_error"] = 1e6
+    body["error"]["refinement_status"] = "fail_outside_tolerance"
+    rep_path.write_text(json.dumps(body, indent=2, sort_keys=True))
+
+    failure = detect_downstream_failure(out)
+    assert failure is not None
+    assert failure.failed_stage == "real_transform_differential"
+    retry_path = emit_downstream_retry_request(
+        out, failure=failure, attempt_index=0,
+    )
+    rr = json.loads(retry_path.read_text(encoding="utf-8"))
+    assert rr["status"] == "retry_required"
+    # The exact message run.py:1251 would have raised, format-checked
+    # against detector + emitter outputs.
+    expected_msg = (
+        f"M-15B downstream-gate rejection: "
+        f"{failure.failed_stage} reported "
+        f"{failure.failed_check!r} fail."
+    )
+    assert "M-15B downstream-gate rejection" in expected_msg
+    assert "real_transform_differential" in expected_msg
 
 
 def test_recipe_mlir_committed_for_failed_candidate(

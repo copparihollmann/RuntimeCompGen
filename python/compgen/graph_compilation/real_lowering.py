@@ -69,14 +69,35 @@ class RealLoweringResult:
 # Whitelist of model IDs that the M-11A audit covered for the executable
 # path. M-11A audited differential correctness on ``merlin_mlp_wide`` only.
 #
-# M-37.12 evolution: on the ``executable_structured_ir`` (clean-divide)
-# path, bit-equality holds **by construction** (no accumulation reorder
-# — every iteration sees a contiguous slice of the original sum). The
-# M-11A audit's load-bearing concern (boundary handling on a real
-# matmul) does not apply here. So on the clean-divide path the gate
-# admits any model. The whitelist is preserved for the
-# ``executable_with_boundary_handling`` path, where the M-11A audit
-# *does* speak — that path remains gated until additional audits land.
+# M-37.12 + M-37.13 — load-bearing safety shift (honest accounting):
+#
+# The pre-M-37.12 ``selected_model_is_merlin_mlp_wide`` gate was the
+# structural barrier preventing non-audited models from claiming
+# differential correctness on the clean-divide path. M-37.12 admits
+# any model on the ``executable_structured_ir`` path. The same safety
+# property is now carried by two structural rules in adjacent gates:
+#
+#   1. ``recipe_gate.single_k_iter`` — ``bit_equality`` is claimed
+#      only when the tile divides every region dim cleanly AND
+#      ``tK >= K_dim`` (single K iteration). Otherwise the recipe
+#      declares ``tolerance_eps``. Multiple K iterations reorder
+#      accumulation and break bit-exact equivalence with eager.
+#
+#   2. ``real_transform_differential.matmul_higham_bound`` (M-37.13)
+#      — for declared ``tolerance_eps`` cases the per-case criterion
+#      is ``|sim - eager| <= 4 * K * eps * max|A| * max|B|`` (Higham's
+#      matmul accumulation bound, derived per-case from inputs;
+#      never silently widened, scales linearly with K and with input
+#      magnitude). For declared ``bit_equality`` the criterion is
+#      exact equality. Negative controls in
+#      ``tests/graph_compilation/test_m37_13_negative_controls.py``
+#      exercise both crafted-input boundaries.
+#
+# The whitelist is preserved (not removed) because it still fires on
+# ``executable_with_boundary_handling``, where the M-11A audit's
+# load-bearing concern (boundary handling on a real matmul) DOES
+# apply. See ``docs/realness/m37_12_clean_divide_admission.yaml``
+# for the full contract and forbidden constructs.
 _EXECUTABLE_MODEL_WHITELIST: frozenset[str] = frozenset({
     "merlin_mlp_wide",
 })
@@ -660,27 +681,33 @@ def run_real_lowering(run_dir: Path) -> RealLoweringResult:
     else:
         # Eligible path (executable or structural-only).
         _add("eligibility_passed", eligible, "")
-        # M-37.12: the named M-11B check is preserved (downstream
-        # tooling reads the name), but its semantics evolved.
-        # - ``executable_structured_ir`` (clean-divide): bit-equality
-        #   holds by construction. Any model passes.
-        # - ``executable_with_boundary_handling``: M-11A audited only
-        #   ``merlin_mlp_wide`` so the gate stays; we mark it skipped
-        #   on this path because the *boundary* path is what the
-        #   audit speaks to but no additional audits have landed yet.
+        # M-37.12 + M-37.13: the named M-11B check is preserved
+        # (downstream tooling reads the name), but its semantics
+        # evolved with explicit safety-shift accounting.
+        #
+        # - ``executable_structured_ir`` (clean-divide): admits any
+        #   model. Load-bearing safety has shifted to two adjacent
+        #   structural gates: recipe_gate.single_k_iter (correct
+        #   refinement declaration) and the M-37.13 Higham-bounded
+        #   semantic check (no hand-picked tolerance constants).
+        #   See module-level whitelist comment.
+        # - ``executable_with_boundary_handling``: skipped on this
+        #   path; the M-11A audit's boundary-handling concern still
+        #   speaks but additional audits have not landed.
         # - Other non-executable paths: skipped.
         if real_kind == "executable_structured_ir":
-            audited_or_safe_by_construction = (
+            audited_or_clean_divide_path = (
                 model_id in _EXECUTABLE_MODEL_WHITELIST
                 or not flags.get("boundary_required", True)
             )
             _add(
                 "selected_model_is_merlin_mlp_wide",
-                audited_or_safe_by_construction,
+                audited_or_clean_divide_path,
                 (
                     f"model_id={model_id!r}; "
                     f"clean-divide path admits any model "
-                    f"(bit-equality by construction)"
+                    f"(safety carried by recipe_gate.single_k_iter "
+                    f"+ M-12 combined tolerance)"
                 ),
             )
         else:
