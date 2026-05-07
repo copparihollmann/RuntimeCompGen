@@ -1,6 +1,6 @@
 # Phase C — Status
 
-_Last updated: 2026-05-07_  ·  _Current head: `b28b9de`_  ·  _Trust report: `/tmp/m40_trust/trust_report.md` (8/8 PASS at `806f558`, 18 contracts)_
+_Last updated: 2026-05-07_  ·  _Current head: `dc756d9`_  ·  _Trust report: `/tmp/m41_trust/trust_report.md` (8/8 PASS at `b28b9de`, 18 contracts)_
 
 This is the canonical Phase C tracker. Every Phase C milestone's done
 condition includes updating this document with the new commit hash,
@@ -44,7 +44,7 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 | ----- | --------------------------------------------- | ----------- | ------- | ------------------------------------------------------------------------------------- | ---------- |
 | M-39  | Kernel-specialization request emitter (data-only prereq) | complete    | `c3b8a30` | `python/compgen/graph_compilation/kernel_specialization.py`, `tests/graph_compilation/test_kernel_specialization_request.py`, `docs/realness/m39_kernel_specialization_request.yaml` | 8 (tests/graph_compilation), 1347/7 (full graph_compilation suite) |
 | M-40  | Contract materialization from Recipe op       | complete    | `b28b9de` | `python/compgen/kernels/contract_v3.py:from_recipe`, `python/compgen/graph_compilation/kernel_contract_materialization.py`, `tests/graph_compilation/test_kernel_contract_materialization.py`, `docs/realness/m40_contract_materialization.yaml` | 11 (M-40), 1138/83-hits-allowlisted, trust report 8/8 PASS |
-| M-41  | Contract hash discipline                      | complete    | _pending_ | `python/compgen/graph_compilation/kernel_contract_materialization.py:hash_contract_from_run_dir`, `promotion_bridge.py` (legacy retired), `agent_decision.py`, `kernel_specialization.py`, `docs/realness/m41_contract_hash_discipline.yaml` | 35 (M-40+M-41+M-39+downstream_retry+agent_decision_retry), 0 derive_contract_hash production callers, 5-phase real-driven stress green |
+| M-41  | Contract hash discipline                      | complete    | `dc756d9` | `python/compgen/graph_compilation/kernel_contract_materialization.py:hash_contract_from_run_dir`, `promotion_bridge.py` (legacy retired), `agent_decision.py`, `kernel_specialization.py`, `docs/realness/m41_contract_hash_discipline.yaml` | 35 affected tests pass, 0 derive_contract_hash production callers, 5-phase real-driven stress green (6/6 warm-cache hits preserved) |
 | M-42  | Kernel-codegen task emitter (supersedes M-39) | planned     | —       | —                                                                                     | —          |
 | M-43  | Provider response schema + commit tool + 4 MCP tools | planned | —     | —                                                                                     | —          |
 | M-44  | Contract-driven verifier checklist (LOAD-BEARING) | planned | —       | —                                                                                     | —          |
@@ -79,9 +79,9 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 
 Append-only log of full Phase C audit runs (commit + verdict + run path).
 
+- `dc756d9` (2026-05-07, M-41 commit): trust report 8/8 PASS at `/tmp/m41_trust/trust_report.md` (18 contracts, 4 caveats, 9 negative controls). Real-driven stress: 5 phases (read/write parity, byte-stability, cold→warm, graceful degradation, full inspection harness). 6/6 warm-cache hits preserved.
 - `b28b9de` (2026-05-07, M-40 commit): trust report 8/8 PASS at `/tmp/m40_trust/trust_report.md` (18 contracts, 4 caveats, 9 negative controls). Realness scan 1138 files, 83 hits all allowlisted. M-40 tests 11/11 pass.
 - `d02ce8a` (2026-05-07, Phase C bootstrap): trust report 8/8 PASS at `/tmp/phase_c_bootstrap_trust/trust_report.md` (17 contracts, 4 caveats, 9 negative controls). Realness scan 1136 files, 83 hits all allowlisted.
-- `c3b8a30` (2026-05-07, M-39 commit): trust report 8/8 PASS at `/tmp/m39_trust/trust_report.md` (16 contracts, 4 caveats, 9 negative controls).
 
 ## Subagent behavior contract (the load-bearing rules)
 
