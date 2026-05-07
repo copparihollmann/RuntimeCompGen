@@ -11,6 +11,10 @@ from compgen.runtime.glue_emit.python_async import (
     AsyncGlueEmitResult,
     emit_python_async_executor,
 )
+from compgen.runtime.glue_emit.python_cuda import (
+    CudaGlueEmitResult,
+    emit_python_cuda_executor,
+)
 from compgen.runtime.glue_emit.python_sync import (
     GlueEmitResult,
     emit_python_sync_executor,
@@ -18,7 +22,9 @@ from compgen.runtime.glue_emit.python_sync import (
 
 __all__ = [
     "AsyncGlueEmitResult",
+    "CudaGlueEmitResult",
     "GlueEmitResult",
     "emit_python_async_executor",
+    "emit_python_cuda_executor",
     "emit_python_sync_executor",
 ]
