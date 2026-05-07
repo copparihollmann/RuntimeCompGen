@@ -191,8 +191,12 @@ class TestBehaviour:
             placements=[RegionPlacement(region_id="r0", device="host_cpu", queue="q")],
         )
         module = self._import_module(run_dir)
-        with pytest.raises(module.PlanViolation, match="UNBOUND_REGION"):
+        with pytest.raises(module.PLAN_VIOLATION_UNBOUND_REGION):
             module.compgen_run({"x": 1}, {}, runtime=_StubRuntime())
+        # The typed subclass is also a PlanViolation.
+        assert issubclass(
+            module.PLAN_VIOLATION_UNBOUND_REGION, module.PlanViolation,
+        )
 
     def test_bound_region_dispatches_through_runtime(
         self, tmp_path: Path,
