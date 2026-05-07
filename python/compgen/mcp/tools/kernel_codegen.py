@@ -295,6 +295,41 @@ def compgen_inspect_kernel_codegen_task(
         "failure_report": _read_json_or_none(
             out_dir / "kernel_codegen_failure_report.json"
         ),
-        # M-45 (kernel certificate) writes here; absent until M-45 lands.
-        "certificate": None,
+        # M-45 kernel certificate, indexed by contract_hash.
+        "certificate": _resolve_certificate(run_dir_path, request),
     }
+
+
+def _resolve_certificate(run_dir: Path, request: dict[str, Any]) -> dict[str, Any] | None:
+    """Best-effort: load the kernel certificate keyed by the request's
+    contract_hash. Returns None when no cert exists yet."""
+    contract_hash = request.get("contract_hash") or ""
+    if not contract_hash:
+        return None
+    cert_path = (
+        run_dir / "04_kernel_codegen" / "certificates" / f"{contract_hash}.json"
+    )
+    body = _read_json_or_none(cert_path)
+    if body is None:
+        return None
+    # Validate the certificate is still consistent with its artifacts
+    # (catches post-cert mutation per the M-37.13 negative-control
+    # pattern).
+    try:
+        from compgen.kernels.kernel_certificate import (
+            KernelCertificate,
+            validate_certificate,
+        )
+        cert = KernelCertificate.from_dict(body)
+        v = validate_certificate(run_dir=run_dir, cert=cert)
+        body = dict(body)
+        body["__validation"] = {
+            "valid": v.valid,
+            "failure_kind": v.failure_kind,
+            "failure_summary": v.failure_summary,
+            "drifted": dict(v.drifted),
+        }
+    except Exception:  # noqa: BLE001
+        body = dict(body)
+        body["__validation"] = {"valid": False, "failure_kind": "load_error"}
+    return body

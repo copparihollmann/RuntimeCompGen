@@ -642,8 +642,32 @@ def commit_response(
                 retry_request_path=str(retry_path.relative_to(run_dir)),
             )
 
-        # Verification accepted (overall=pass or pass+deferred). M-45
-        # writes the certificate next.
+        # Verification accepted (overall=pass or pass+deferred).
+        # M-45: emit the kernel certificate ONLY when the verifier
+        # produced overall=pass (deferred verdicts wait for
+        # M-47/M-48/M-49 to land their checks). On pass+deferred mix,
+        # the cert could be emitted with a deferred-state flag, but
+        # M-45 ships the strict-pass-only path — the certificate is
+        # only meaningful once verification is complete.
+        certificate_path_str = ""
+        if verification["overall"] == "pass" and isinstance(response, dict):
+            try:
+                from compgen.kernels.kernel_certificate import (
+                    emit_certificate,
+                )
+                report_path = run_dir / verification["validation_report_path"]
+                cert_path = emit_certificate(
+                    run_dir=run_dir,
+                    request_body=request_body,
+                    response_body=response,
+                    verifier_report_path=report_path,
+                    fallback_used=False,
+                    fallback_reason="",
+                )
+                certificate_path_str = str(cert_path.relative_to(run_dir))
+            except Exception:  # noqa: BLE001 — never let cert emit
+                # block an accept, but record the gap.
+                certificate_path_str = ""
         return CommitResult(
             accepted=True, task_id=task_id, attempt_index=attempt_index,
             next_action=(
@@ -652,6 +676,7 @@ def commit_response(
                 else "verifier_pending"
             ),
             attempt_dir=str(attempt_dir.relative_to(run_dir)),
+            certificate_path=certificate_path_str,
         )
 
     # Rejection paths.
