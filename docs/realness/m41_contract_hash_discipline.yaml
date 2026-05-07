@@ -33,8 +33,8 @@ required_evidence:
 - python/compgen/graph_compilation/promotion_bridge.py (legacy derive_contract_hash retired)
 - python/compgen/graph_compilation/agent_decision.py (routed through canonical hash)
 - python/compgen/graph_compilation/kernel_specialization.py (M-39 emitter routed through canonical hash)
-- 04_kernel_codegen/contract_materialization_summary.json + 04_kernel_specialization/requests/*.json on a real run carry the same contract_hash for the same selected candidate
-- ``.compgen_cache/recipes/<key>/promoted_recipe.json`` produced post-M-41 carries the canonical hash; cold-then-warm run finds it as ``match_kind=exact_contract``
+- "04_kernel_codegen/contract_materialization_summary.json + 04_kernel_codegen/requests/*.request.json on a real run carry the same contract_hash for the same selected candidate"
+- ".compgen_cache/recipes/<key>/promoted_recipe.json produced post-M-41 carries the canonical hash; cold-then-warm run finds it as match_kind=exact_contract"
 notes: |
   Real-driven stress test (the user's framing — drive a workload, not
   more pytests):

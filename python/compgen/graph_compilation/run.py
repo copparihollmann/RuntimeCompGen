@@ -44,8 +44,9 @@ SUPPORTED_STOP_AFTER: tuple[str, ...] = (
     "real-set-tile-transform",
     "real-transform-differential",
     "cost-preview-v2",
-    "agent-decision-request", "kernel-specialization-request",
-    "kernel-specialization-request",
+    "agent-decision-request",
+    "kernel-specialization-request", "kernel-codegen-request",
+    "kernel-codegen-request",
     "gap-discovery",
     "gap-closure",
 )
@@ -379,7 +380,7 @@ def run_graph_compilation(
         "payload-lowering", "graph-analysis",
         "recipe-planning", "recipe-verification", "recipe-lowering",
         "post-lowering-verification", "differential-verification",
-        "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
+        "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "kernel-codegen-request",
         "gap-discovery", "gap-closure",
     )
     if needs_lowering:
@@ -454,7 +455,7 @@ def run_graph_compilation(
         "graph-analysis", "recipe-planning", "recipe-verification",
         "recipe-lowering", "post-lowering-verification",
         "differential-verification", "real-transform-eligibility",
-        "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
+        "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "kernel-codegen-request",
         "gap-discovery", "gap-closure",
     )
     if needs_graph_analysis:
@@ -478,7 +479,7 @@ def run_graph_compilation(
     needs_recipe_planning = stop_after in (
         "recipe-planning", "recipe-verification", "recipe-lowering",
         "post-lowering-verification", "differential-verification",
-        "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
+        "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "kernel-codegen-request",
         "gap-discovery", "gap-closure",
     )
     if needs_recipe_planning:
@@ -506,7 +507,7 @@ def run_graph_compilation(
         if stop_after in (
             "recipe-verification", "recipe-lowering",
             "post-lowering-verification", "differential-verification",
-            "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
+            "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "kernel-codegen-request",
             "gap-discovery", "gap-closure",
         ):
             from compgen.graph_compilation.recipe_gate import run_recipe_gate
@@ -525,7 +526,7 @@ def run_graph_compilation(
         if stop_after in (
             "recipe-lowering", "post-lowering-verification",
             "differential-verification", "real-transform-eligibility",
-            "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
+            "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "kernel-codegen-request",
             "gap-discovery", "gap-closure",
         ):
             from compgen.graph_compilation.recipe_lowering import (
@@ -547,7 +548,7 @@ def run_graph_compilation(
         # byte-identical.
         if stop_after in (
             "post-lowering-verification", "differential-verification",
-            "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
+            "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "kernel-codegen-request",
             "gap-discovery", "gap-closure"
         ):
             from compgen.graph_compilation.post_lowering import (
@@ -594,7 +595,7 @@ def run_graph_compilation(
         # inert; re-checks Stage-0 goldens; validates contract drafts.
         if stop_after in (
             "differential-verification", "real-transform-eligibility",
-            "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
+            "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "kernel-codegen-request",
             "gap-discovery", "gap-closure"
         ):
             from compgen.graph_compilation.differential_verification import (
@@ -640,7 +641,7 @@ def run_graph_compilation(
         # tiling MVP. Emits 03_recipe_planning/real_transform_eligibility
         # .json + .md. No payload mutation; no transformed real artifact.
         if stop_after in (
-            "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
+            "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "kernel-codegen-request",
             "gap-discovery", "gap-closure"
         ):
             from compgen.graph_compilation.real_transform_eligibility import (
@@ -661,7 +662,7 @@ def run_graph_compilation(
         # M-11B real SetTileParams transform MVP: emits a tiled
         # transformed_payload.real.mlir for eligible matmuls.
         if stop_after in (
-            "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "gap-discovery", "gap-closure"
+            "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "kernel-codegen-request", "gap-discovery", "gap-closure"
         ):
             from compgen.graph_compilation.real_lowering import (
                 run_real_lowering,
@@ -705,7 +706,7 @@ def run_graph_compilation(
         # real_transform_differential_check via Path A executable
         # evaluator (eligible cases) or emits a blocked report (Path B).
         if stop_after in (
-            "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "gap-discovery", "gap-closure"
+            "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "kernel-codegen-request", "gap-discovery", "gap-closure"
         ):
             from compgen.graph_compilation.real_transform_differential import (
                 run_real_transform_differential,
@@ -785,7 +786,7 @@ def run_graph_compilation(
         # 02_graph_analysis/ pinned by graph_analysis.output_hash are not
         # touched. Same hash-chain pattern as M-10B.
         if stop_after in (
-            "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "gap-discovery", "gap-closure"
+            "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "kernel-codegen-request", "gap-discovery", "gap-closure"
         ):
             from compgen.graph_compilation.cost_preview_v2 import (
                 run_cost_preview_v2,
@@ -1271,47 +1272,27 @@ def run_graph_compilation(
     # rather than skip silently.
     # ------------------------------------------------------------------ #
     needs_kernel_specialization = stop_after in (
-        "kernel-specialization-request",
+        "kernel-specialization-request", "kernel-codegen-request",
         "gap-discovery",
         "gap-closure",
     )
     if needs_kernel_specialization:
-        from compgen.graph_compilation.kernel_specialization import (
-            run_kernel_specialization_request,
-        )
-
+        # Phase C unified kernel-codegen boundary. M-39's legacy
+        # request emitter is superseded by M-42; the legacy
+        # 04_kernel_specialization/ directory is no longer written.
+        # The boundary now runs two sibling sub-steps:
+        #   1. M-40 — materialize KernelContractV3 from the selected
+        #      Recipe op (writes 04_kernel_codegen/contracts/... +
+        #      kernel_facing view at 04_kernel_codegen/views/...).
+        #   2. M-42 — emit the kernel-codegen task that points at those
+        #      contract files (writes 04_kernel_codegen/requests/... +
+        #      creates the sandboxed artifact_dir).
         _append_ledger(
             ledger_path, stage_id="kernel_specialization_request",
             event="start",
         )
-        try:
-            _kspec = run_kernel_specialization_request(out_dir)
-            _append_ledger(
-                ledger_path, stage_id="kernel_specialization_request",
-                event="artifact_written",
-                note=(
-                    f"kernel_specialization_request (M-39): "
-                    f"{_kspec.overall} (request_kind={_kspec.request_kind!r}, "
-                    f"request_id={_kspec.request_id!r})"
-                ),
-            )
-        except Exception as exc:  # noqa: BLE001
-            _append_ledger(
-                ledger_path, stage_id="kernel_specialization_request",
-                event="artifact_written",
-                note=(
-                    f"kernel_specialization_request (M-39): error "
-                    f"{type(exc).__name__}: {exc}"
-                ),
-            )
-            raise
-        # M-40 (Phase C): materialize KernelContractV3 from the same
-        # selected candidate that M-39 just emitted a request for. This
-        # writes 04_kernel_codegen/contracts/<region>.<contract_hash>.json
-        # plus the kernel_facing() projection at 04_kernel_codegen/views/.
-        # M-42 unifies this with M-39's request emitter under one
-        # 04_kernel_codegen/ stage; until then they are sibling
-        # sub-steps of the same boundary check.
+
+        # M-40 — contract materialization.
         from compgen.graph_compilation.kernel_contract_materialization import (
             materialize_contract_for_run,
         )
@@ -1332,6 +1313,37 @@ def run_graph_compilation(
                 event="artifact_written",
                 note=(
                     f"kernel_contract_materialization (M-40): error "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            )
+            raise
+
+        # M-42 (Phase C): emit the kernel-codegen task that supersedes
+        # M-39's request schema. Reads the M-40 materialization summary
+        # to find contract_hash + paths; writes
+        # 04_kernel_codegen/requests/<task_id>.request.json + creates
+        # the sandboxed artifact_dir.
+        from compgen.graph_compilation.kernel_codegen import (
+            run_kernel_codegen_request,
+        )
+
+        try:
+            _kc = run_kernel_codegen_request(out_dir)
+            _append_ledger(
+                ledger_path, stage_id="kernel_specialization_request",
+                event="artifact_written",
+                note=(
+                    f"kernel_codegen_request (M-42): {_kc.overall} "
+                    f"(request_kind={_kc.request_kind!r}, "
+                    f"task_id={_kc.request_id!r})"
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _append_ledger(
+                ledger_path, stage_id="kernel_specialization_request",
+                event="artifact_written",
+                note=(
+                    f"kernel_codegen_request (M-42): error "
                     f"{type(exc).__name__}: {exc}"
                 ),
             )
