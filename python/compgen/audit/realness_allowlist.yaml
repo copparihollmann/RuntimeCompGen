@@ -369,6 +369,10 @@ allowed_nonproduction_symbols:
     reason: "M-48's realness contract; meta-reference, not a residual"
     forbidden_in: []
 
+  - path: docs/realness/m49_glue_differential.yaml
+    reason: "M-49's paper-facing realness contract; meta-reference, not a residual"
+    forbidden_in: []
+
   - path: docs/realness/phase_c_status_tracker.yaml
     reason: "Phase C bootstrap contract; meta-reference, not a residual"
     forbidden_in: []

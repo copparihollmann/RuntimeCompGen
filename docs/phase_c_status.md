@@ -52,7 +52,7 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 | M-46  | Plan ↔ certified-kernels link                 | complete    | `0c80c28` | `python/compgen/runtime/execution_plan.py` (RegionKernelBinding + validate_with_run_dir), `python/compgen/graph_compilation/execution_plan_emit.py`, `run.py` + `__main__.py` (boundary + flag), `tests/runtime/test_region_kernel_binding.py`, `docs/realness/m46_plan_kernel_binding.yaml` | 10 (M-46) + 12 (M-45), 5/5 models flip unbound→bound on cert emit, tamper → typed artifact_hash_drift |
 | M-47  | Python SYNC plan executor                     | complete    | `543edd4` | `python/compgen/runtime/glue_emit/{__init__,python_sync}.py`, `python/compgen/graph_compilation/run.py` (--stop-after glue-emit boundary), `tests/runtime/test_glue_emit_python_sync.py`, `docs/realness/m47_python_sync_executor.yaml` | 9 (M-47), real-driven stress: imported emitted module + ran compgen_run end-to-end, output=(16,32) Tensor |
 | M-48  | Runtime plan assertions                       | complete    | `99ac9ff` | `python/compgen/runtime/glue_emit/plan_assertions.py`, `python/compgen/runtime/glue_emit/python_sync.py` (M-48 wiring), `tests/runtime/test_plan_assertions.py`, `docs/realness/m48_plan_assertions.yaml` | 7 (M-48), 9 typed PLAN_VIOLATION_<KIND> classes, real-driven stress: 5 fault-injection cases all fire correctly |
-| M-49  | Glue differential — paper-facing              | planned     | —       | —                                                                                     | —          |
+| M-49  | Glue differential — paper-facing              | complete    | _pending_ | `python/compgen/graph_compilation/glue_differential.py`, `python/compgen/graph_compilation/downstream_retry.py` (glue_differential row), `tests/graph_compilation/test_glue_differential.py`, `docs/realness/m49_glue_differential.yaml` | 6 (M-49), real-driven: merlin discharged_bit_equality 8/8, tiny_mlp discharged_tolerance_eps 8/8, tamper → fail+M-15B fires |
 | M-50  | SetDispatchMode as Recipe IR decision         | planned     | —       | —                                                                                     | —          |
 | M-51  | CPU ASYNC + EventTensor executor              | planned     | —       | —                                                                                     | —          |
 | M-52  | CUDA ASYNC + graph capture executor           | planned     | —       | —                                                                                     | —          |
@@ -61,7 +61,7 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 
 | Slice | Description                                           | Target milestone gate | Status   |
 | ----- | ----------------------------------------------------- | --------------------- | -------- |
-| 1     | merlin_mlp_wide on host_cpu via cffi-C, SYNC          | M-49                  | planned  |
+| 1     | merlin_mlp_wide on host_cpu via cffi-C, SYNC          | M-49                  | **complete (M-49 b28b9de paper-facing claim now real)** |
 | 2     | proxy_vla on host_cpu (fusion path), SYNC             | M-49                  | planned  |
 | 3     | merlin_mlp_wide on cuda_sm75 via Triton, SYNC + ASYNC | M-52                  | planned  |
 | 4     | proxy_vla on host_cpu, ASYNC + EventTensor            | M-51                  | planned  |

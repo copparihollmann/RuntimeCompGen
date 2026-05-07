@@ -161,7 +161,7 @@ def _emit_executor_source(
             "    )"
         )
         bound_lines.append(
-            f"    last_out = out_{region_id}.outputs"
+            f"    last_out = out_{region_id}.output"
         )
     if not bound_lines:
         bound_lines.append("    last_out = ()  # no regions to dispatch")

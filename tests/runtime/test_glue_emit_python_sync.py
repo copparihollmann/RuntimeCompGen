@@ -294,8 +294,8 @@ class _StubRuntime:
         self.dispatch_calls += 1
 
         class _Result:
-            def __init__(self, outputs):
-                self.outputs = outputs
+            def __init__(self, output):
+                self.output = output
 
         out = callable_kernel(*args, **kwargs)
         return _Result(out)

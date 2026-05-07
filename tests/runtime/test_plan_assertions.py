@@ -124,7 +124,7 @@ class _StubRuntime:
         self.dispatch_count += 1
 
         class _R:
-            def __init__(self, o): self.outputs = o
+            def __init__(self, o): self.output = o
         return _R(callable_kernel(*args, **kwargs))
 
     def synchronize(self) -> None:
