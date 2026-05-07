@@ -1305,6 +1305,38 @@ def run_graph_compilation(
                 ),
             )
             raise
+        # M-40 (Phase C): materialize KernelContractV3 from the same
+        # selected candidate that M-39 just emitted a request for. This
+        # writes 04_kernel_codegen/contracts/<region>.<contract_hash>.json
+        # plus the kernel_facing() projection at 04_kernel_codegen/views/.
+        # M-42 unifies this with M-39's request emitter under one
+        # 04_kernel_codegen/ stage; until then they are sibling
+        # sub-steps of the same boundary check.
+        from compgen.graph_compilation.kernel_contract_materialization import (
+            materialize_contract_for_run,
+        )
+
+        try:
+            _mat = materialize_contract_for_run(out_dir)
+            _append_ledger(
+                ledger_path, stage_id="kernel_specialization_request",
+                event="artifact_written",
+                note=(
+                    f"kernel_contract_materialization (M-40): "
+                    f"{_mat.overall} (rows={len(_mat.rows)})"
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _append_ledger(
+                ledger_path, stage_id="kernel_specialization_request",
+                event="artifact_written",
+                note=(
+                    f"kernel_contract_materialization (M-40): error "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            )
+            raise
+
         _append_ledger(
             ledger_path, stage_id="kernel_specialization_request",
             event="finish",

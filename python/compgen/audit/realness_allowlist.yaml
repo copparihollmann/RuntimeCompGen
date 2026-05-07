@@ -345,6 +345,10 @@ allowed_nonproduction_symbols:
     reason: "Phase C bootstrap contract; meta-reference, not a residual"
     forbidden_in: []
 
+  - path: docs/realness/m40_contract_materialization.yaml
+    reason: "M-40's realness contract; meta-reference, not a residual"
+    forbidden_in: []
+
 # Patterns we tolerate inside any source file (e.g. comment markers in
 # docs / generated stubs / strings). The base scanner already excludes
 # .compgen_cache, .crg-artifacts, results/, __pycache__, .git, and tests/
