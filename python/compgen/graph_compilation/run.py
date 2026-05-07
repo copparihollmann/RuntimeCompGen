@@ -44,7 +44,8 @@ SUPPORTED_STOP_AFTER: tuple[str, ...] = (
     "real-set-tile-transform",
     "real-transform-differential",
     "cost-preview-v2",
-    "agent-decision-request",
+    "agent-decision-request", "kernel-specialization-request",
+    "kernel-specialization-request",
     "gap-discovery",
     "gap-closure",
 )
@@ -378,7 +379,7 @@ def run_graph_compilation(
         "payload-lowering", "graph-analysis",
         "recipe-planning", "recipe-verification", "recipe-lowering",
         "post-lowering-verification", "differential-verification",
-        "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request",
+        "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
         "gap-discovery", "gap-closure",
     )
     if needs_lowering:
@@ -453,7 +454,7 @@ def run_graph_compilation(
         "graph-analysis", "recipe-planning", "recipe-verification",
         "recipe-lowering", "post-lowering-verification",
         "differential-verification", "real-transform-eligibility",
-        "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request",
+        "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
         "gap-discovery", "gap-closure",
     )
     if needs_graph_analysis:
@@ -477,7 +478,7 @@ def run_graph_compilation(
     needs_recipe_planning = stop_after in (
         "recipe-planning", "recipe-verification", "recipe-lowering",
         "post-lowering-verification", "differential-verification",
-        "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request",
+        "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
         "gap-discovery", "gap-closure",
     )
     if needs_recipe_planning:
@@ -505,7 +506,7 @@ def run_graph_compilation(
         if stop_after in (
             "recipe-verification", "recipe-lowering",
             "post-lowering-verification", "differential-verification",
-            "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request",
+            "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
             "gap-discovery", "gap-closure",
         ):
             from compgen.graph_compilation.recipe_gate import run_recipe_gate
@@ -524,7 +525,7 @@ def run_graph_compilation(
         if stop_after in (
             "recipe-lowering", "post-lowering-verification",
             "differential-verification", "real-transform-eligibility",
-            "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request",
+            "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
             "gap-discovery", "gap-closure",
         ):
             from compgen.graph_compilation.recipe_lowering import (
@@ -546,7 +547,7 @@ def run_graph_compilation(
         # byte-identical.
         if stop_after in (
             "post-lowering-verification", "differential-verification",
-            "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request",
+            "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
             "gap-discovery", "gap-closure"
         ):
             from compgen.graph_compilation.post_lowering import (
@@ -593,7 +594,7 @@ def run_graph_compilation(
         # inert; re-checks Stage-0 goldens; validates contract drafts.
         if stop_after in (
             "differential-verification", "real-transform-eligibility",
-            "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request",
+            "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
             "gap-discovery", "gap-closure"
         ):
             from compgen.graph_compilation.differential_verification import (
@@ -639,7 +640,7 @@ def run_graph_compilation(
         # tiling MVP. Emits 03_recipe_planning/real_transform_eligibility
         # .json + .md. No payload mutation; no transformed real artifact.
         if stop_after in (
-            "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request",
+            "real-transform-eligibility", "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request",
             "gap-discovery", "gap-closure"
         ):
             from compgen.graph_compilation.real_transform_eligibility import (
@@ -660,7 +661,7 @@ def run_graph_compilation(
         # M-11B real SetTileParams transform MVP: emits a tiled
         # transformed_payload.real.mlir for eligible matmuls.
         if stop_after in (
-            "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "gap-discovery", "gap-closure"
+            "real-set-tile-transform", "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "gap-discovery", "gap-closure"
         ):
             from compgen.graph_compilation.real_lowering import (
                 run_real_lowering,
@@ -704,7 +705,7 @@ def run_graph_compilation(
         # real_transform_differential_check via Path A executable
         # evaluator (eligible cases) or emits a blocked report (Path B).
         if stop_after in (
-            "real-transform-differential", "cost-preview-v2", "agent-decision-request", "gap-discovery", "gap-closure"
+            "real-transform-differential", "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "gap-discovery", "gap-closure"
         ):
             from compgen.graph_compilation.real_transform_differential import (
                 run_real_transform_differential,
@@ -784,7 +785,7 @@ def run_graph_compilation(
         # 02_graph_analysis/ pinned by graph_analysis.output_hash are not
         # touched. Same hash-chain pattern as M-10B.
         if stop_after in (
-            "cost-preview-v2", "agent-decision-request", "gap-discovery", "gap-closure"
+            "cost-preview-v2", "agent-decision-request", "kernel-specialization-request", "gap-discovery", "gap-closure"
         ):
             from compgen.graph_compilation.cost_preview_v2 import (
                 run_cost_preview_v2,
@@ -1256,6 +1257,58 @@ def run_graph_compilation(
                 f"downstream_retry_request.json for the typed retry "
                 f"surface."
             )
+
+    # ------------------------------------------------------------------ #
+    # Kernel Specialization Request emission (M-39 / Section 21).
+    #
+    # When stop_after >= ``kernel-specialization-request`` we read the
+    # selected Recipe IR decision + region facts and emit a typed
+    # ``KernelSpecializationRequest`` to ``04_kernel_specialization/
+    # requests/<request_id>.json``. M-39 is data-only — no codegen
+    # fires here; M-40 (Triton emitter) and M-41 (C reference) consume
+    # the request. Non-applicable recipe kinds (today: anything except
+    # ``set_tile_params``) emit a typed ``not_applicable`` request
+    # rather than skip silently.
+    # ------------------------------------------------------------------ #
+    needs_kernel_specialization = stop_after in (
+        "kernel-specialization-request",
+        "gap-discovery",
+        "gap-closure",
+    )
+    if needs_kernel_specialization:
+        from compgen.graph_compilation.kernel_specialization import (
+            run_kernel_specialization_request,
+        )
+
+        _append_ledger(
+            ledger_path, stage_id="kernel_specialization_request",
+            event="start",
+        )
+        try:
+            _kspec = run_kernel_specialization_request(out_dir)
+            _append_ledger(
+                ledger_path, stage_id="kernel_specialization_request",
+                event="artifact_written",
+                note=(
+                    f"kernel_specialization_request (M-39): "
+                    f"{_kspec.overall} (request_kind={_kspec.request_kind!r}, "
+                    f"request_id={_kspec.request_id!r})"
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _append_ledger(
+                ledger_path, stage_id="kernel_specialization_request",
+                event="artifact_written",
+                note=(
+                    f"kernel_specialization_request (M-39): error "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            )
+            raise
+        _append_ledger(
+            ledger_path, stage_id="kernel_specialization_request",
+            event="finish",
+        )
 
     # ------------------------------------------------------------------ #
     # Gap Discovery (when stop_after >= gap-discovery)
