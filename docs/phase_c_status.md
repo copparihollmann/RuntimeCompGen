@@ -1,6 +1,6 @@
 # Phase C — Status
 
-_Last updated: 2026-05-07_  ·  _Current head: `c3b8a30`_  ·  _Trust report: `/tmp/m39_trust/trust_report.md` (8/8 PASS at `6162d6e`)_
+_Last updated: 2026-05-07_  ·  _Current head: `d02ce8a`_  ·  _Trust report: `/tmp/phase_c_bootstrap_trust/trust_report.md` (8/8 PASS at `c3b8a30`, 17 contracts)_
 
 This is the canonical Phase C tracker. Every Phase C milestone's done
 condition includes updating this document with the new commit hash,
@@ -79,6 +79,7 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 
 Append-only log of full Phase C audit runs (commit + verdict + run path).
 
+- `d02ce8a` (2026-05-07, Phase C bootstrap): trust report 8/8 PASS at `/tmp/phase_c_bootstrap_trust/trust_report.md` (17 contracts, 4 caveats, 9 negative controls). Realness scan 1136 files, 83 hits all allowlisted.
 - `c3b8a30` (2026-05-07, M-39 commit): trust report 8/8 PASS at `/tmp/m39_trust/trust_report.md` (16 contracts, 4 caveats, 9 negative controls).
 - _(future entries here.)_
 
