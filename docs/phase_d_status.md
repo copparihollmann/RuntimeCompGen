@@ -1,6 +1,6 @@
 # Phase D — Status
 
-_Last updated: 2026-05-07_  ·  _Current head: `e3d7454` (pre-M-55 commit)_  ·  _Phase plan: `~/.claude/plans/stateful-jumping-lovelace.md`_
+_Last updated: 2026-05-07_  ·  _Current head: `51155d8` (M-55 landed)_  ·  _Phase plan: `~/.claude/plans/stateful-jumping-lovelace.md`_  ·  _Trust report: `/tmp/m55_trust/trust_report.md` (8/8 PASS, 32 contracts)_
 
 This is the canonical Phase D tracker. Every Phase D milestone's done
 condition includes updating this document with the new commit hash,
@@ -43,7 +43,7 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 
 | ID    | Name                                                | Status        | Commit  | Evidence                                                                                            | Test count |
 | ----- | --------------------------------------------------- | ------------- | ------- | --------------------------------------------------------------------------------------------------- | ---------- |
-| M-55  | Wire ProviderRegistry into Phase C kernel-codegen   | in_progress   | —       | `python/compgen/kernels/registry.py` (applicable() + default_registry), `python/compgen/graph_compilation/kernel_codegen.py` (registry_resolution emit), `tests/graph_compilation/test_registry_wired.py`, `docs/realness/m55_registry_wired.yaml` | 7 (M-55), 62/62 Phase C regression preserved |
+| M-55  | Wire ProviderRegistry into Phase C kernel-codegen   | complete      | `51155d8` | `python/compgen/kernels/registry.py` (applicable() + default_registry), `python/compgen/graph_compilation/kernel_codegen.py` (registry_resolution emit), `tests/graph_compilation/test_registry_wired.py`, `docs/realness/m55_registry_wired.yaml` | 7 (M-55), 62/62 Phase C regression preserved, trust 8/8 (32 contracts) |
 | M-56  | Two-stage provider protocol (bid + fulfill)         | planned       | —       | —                                                                                                   | —          |
 | M-57  | Multi-bidder auction with tool-mediated pruning     | planned       | —       | —                                                                                                   | —          |
 | M-58  | Canonical shape-class hash                          | planned       | —       | —                                                                                                   | —          |
@@ -77,4 +77,6 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 
 ## Last 3 trust reports
 
-(Append-only — every full Phase D audit run lands here with its commit + verdict.)
+Append-only log of full Phase D audit runs (commit + verdict + run path).
+
+- `51155d8` (2026-05-07, M-55 commit — Phase D bootstrap): trust report 8/8 PASS at `/tmp/m55_trust/trust_report.md` (32 contracts, 4 caveats, 9 negative controls). Realness scan 1165 files, 85 hits all allowlisted. Real-driven stress on merlin_mlp_wide host_cpu: `04_kernel_codegen/registry_resolution.json` emitted with schema `registry_resolution_v1`, applicable_provider_names=[] (no entry-point providers in clean checkout), fallback_used=true, contract_hash=4838412db0b5c6b8 byte-stable across reruns. Phase C regression 62/62 preserved (kernel_codegen_request, kernel_codegen_response, contract_materialization, resume_from, kernel_certificate, contract_verifier).
