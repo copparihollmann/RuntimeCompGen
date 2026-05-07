@@ -1,6 +1,6 @@
 # Phase C — Status
 
-_Last updated: 2026-05-07_  ·  _Current head: `d02ce8a`_  ·  _Trust report: `/tmp/phase_c_bootstrap_trust/trust_report.md` (8/8 PASS at `c3b8a30`, 17 contracts)_
+_Last updated: 2026-05-07_  ·  _Current head: `b28b9de`_  ·  _Trust report: `/tmp/m40_trust/trust_report.md` (8/8 PASS at `806f558`, 18 contracts)_
 
 This is the canonical Phase C tracker. Every Phase C milestone's done
 condition includes updating this document with the new commit hash,
@@ -43,7 +43,7 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 | ID    | Name                                          | Status      | Commit  | Evidence                                                                              | Test count |
 | ----- | --------------------------------------------- | ----------- | ------- | ------------------------------------------------------------------------------------- | ---------- |
 | M-39  | Kernel-specialization request emitter (data-only prereq) | complete    | `c3b8a30` | `python/compgen/graph_compilation/kernel_specialization.py`, `tests/graph_compilation/test_kernel_specialization_request.py`, `docs/realness/m39_kernel_specialization_request.yaml` | 8 (tests/graph_compilation), 1347/7 (full graph_compilation suite) |
-| M-40  | Contract materialization from Recipe op       | complete    | _pending_ | `python/compgen/kernels/contract_v3.py:from_recipe`, `python/compgen/graph_compilation/kernel_contract_materialization.py`, `tests/graph_compilation/test_kernel_contract_materialization.py`, `docs/realness/m40_contract_materialization.yaml` | 11 (M-40), 1138/83-hits-allowlisted |
+| M-40  | Contract materialization from Recipe op       | complete    | `b28b9de` | `python/compgen/kernels/contract_v3.py:from_recipe`, `python/compgen/graph_compilation/kernel_contract_materialization.py`, `tests/graph_compilation/test_kernel_contract_materialization.py`, `docs/realness/m40_contract_materialization.yaml` | 11 (M-40), 1138/83-hits-allowlisted, trust report 8/8 PASS |
 | M-41  | Contract hash discipline                      | planned     | —       | —                                                                                     | —          |
 | M-42  | Kernel-codegen task emitter (supersedes M-39) | planned     | —       | —                                                                                     | —          |
 | M-43  | Provider response schema + commit tool + 4 MCP tools | planned | —     | —                                                                                     | —          |
@@ -79,9 +79,9 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 
 Append-only log of full Phase C audit runs (commit + verdict + run path).
 
+- `b28b9de` (2026-05-07, M-40 commit): trust report 8/8 PASS at `/tmp/m40_trust/trust_report.md` (18 contracts, 4 caveats, 9 negative controls). Realness scan 1138 files, 83 hits all allowlisted. M-40 tests 11/11 pass.
 - `d02ce8a` (2026-05-07, Phase C bootstrap): trust report 8/8 PASS at `/tmp/phase_c_bootstrap_trust/trust_report.md` (17 contracts, 4 caveats, 9 negative controls). Realness scan 1136 files, 83 hits all allowlisted.
 - `c3b8a30` (2026-05-07, M-39 commit): trust report 8/8 PASS at `/tmp/m39_trust/trust_report.md` (16 contracts, 4 caveats, 9 negative controls).
-- _(future entries here.)_
 
 ## Subagent behavior contract (the load-bearing rules)
 
