@@ -6,11 +6,24 @@ bidirectional communication between CompGen and providers:
 1. Dispatch: route contracts to accepting providers
 2. Knowledge ingestion: collect exports from all providers into memory
 3. Contract evolution: apply provider feedback to update contracts
+
+Phase D / M-55: ``applicable()`` exposes a static-metadata filter over
+``KernelContractV3`` so the kernel-codegen pipeline (M-42) can log which
+providers *could* bid before any provider methods are invoked. The
+filter reads optional class-level attributes on each provider:
+
+* ``applicable_targets: tuple[str, ...]`` — empty tuple = wildcard.
+* ``applicable_archetypes: tuple[str, ...]`` — empty tuple = wildcard.
+
+These attributes are read with ``getattr(p, name, ())`` so legacy
+providers without them are treated as wildcard matches (today's
+behaviour preserved exactly).
 """
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -23,7 +36,47 @@ from compgen.kernels.provider import (
     SearchBudget,
 )
 
+if TYPE_CHECKING:
+    from compgen.kernels.contract_v3 import KernelContractV3
+
 log = structlog.get_logger()
+
+
+@dataclass(frozen=True)
+class ProviderApplicability:
+    """Why (or why not) a provider was deemed applicable for a contract.
+
+    M-55 emits one of these per registered provider into
+    ``04_kernel_codegen/registry_resolution.json`` so the M-57 auction
+    has a stable, byte-deterministic record of which providers it
+    considered for a given task.
+    """
+
+    provider_name: str
+    source: str  # "in_tree" | "entry_point" | "user_path"
+    priority: int
+    applicable_targets: tuple[str, ...]
+    applicable_archetypes: tuple[str, ...]
+    matches_target: bool
+    matches_archetype: bool
+    match_reason: str
+
+    @property
+    def applicable(self) -> bool:
+        return self.matches_target and self.matches_archetype
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider_name": self.provider_name,
+            "source": self.source,
+            "priority": self.priority,
+            "applicable_targets": list(self.applicable_targets),
+            "applicable_archetypes": list(self.applicable_archetypes),
+            "matches_target": self.matches_target,
+            "matches_archetype": self.matches_archetype,
+            "applicable": self.applicable,
+            "match_reason": self.match_reason,
+        }
 
 
 class ProviderRegistry:
@@ -199,4 +252,155 @@ class ProviderRegistry:
         )
 
 
-__all__ = ["ProviderRegistry"]
+    # ------------------------------------------------------------------
+    # M-55 — static-metadata applicability over KernelContractV3
+    # ------------------------------------------------------------------
+
+    def applicable(
+        self,
+        contract_v3: KernelContractV3,
+    ) -> list[ProviderApplicability]:
+        """Static-metadata filter: which providers could bid on this V3 contract?
+
+        This is a *pure* metadata match — no provider methods are
+        invoked. M-56's ``bid()`` and M-57's ``fulfill()`` consume this
+        list. Until then, the codegen pipeline calls this and writes
+        ``04_kernel_codegen/registry_resolution.json`` for traceability;
+        the actual codegen path (today: Claude-Code subagent via M-43
+        commit) is unchanged.
+
+        Args:
+            contract_v3: The materialized V3 contract.
+
+        Returns:
+            One :class:`ProviderApplicability` per registered provider.
+            Callers filter to ``.applicable`` for the bid list; the full
+            list is logged so a non-match is auditable.
+        """
+        target_name = ""
+        try:
+            execution = contract_v3.orchestration.execution
+            if execution is not None:
+                target_name = execution.hardware.target_name
+        except AttributeError:
+            target_name = ""
+
+        archetype_value = ""
+        try:
+            archetype_value = contract_v3.archetype.value
+        except AttributeError:
+            archetype_value = ""
+
+        out: list[ProviderApplicability] = []
+        for p in self._providers:
+            applicable_targets = tuple(getattr(p, "applicable_targets", ()) or ())
+            applicable_archetypes = tuple(getattr(p, "applicable_archetypes", ()) or ())
+            priority = int(getattr(p, "priority", 0))
+            source = str(getattr(p, "_compgen_source", "in_tree"))
+
+            matches_target = (
+                len(applicable_targets) == 0  # wildcard
+                or target_name in applicable_targets
+            )
+            matches_archetype = (
+                len(applicable_archetypes) == 0  # wildcard
+                or archetype_value in applicable_archetypes
+            )
+
+            if matches_target and matches_archetype:
+                if not applicable_targets and not applicable_archetypes:
+                    reason = "wildcard"
+                elif applicable_targets and applicable_archetypes:
+                    reason = "target+archetype"
+                elif applicable_targets:
+                    reason = "target_only"
+                else:
+                    reason = "archetype_only"
+            else:
+                missing = []
+                if not matches_target:
+                    missing.append(f"target={target_name!r} not in {list(applicable_targets)}")
+                if not matches_archetype:
+                    missing.append(f"archetype={archetype_value!r} not in {list(applicable_archetypes)}")
+                reason = "; ".join(missing)
+
+            out.append(
+                ProviderApplicability(
+                    provider_name=p.name,
+                    source=source,
+                    priority=priority,
+                    applicable_targets=applicable_targets,
+                    applicable_archetypes=applicable_archetypes,
+                    matches_target=matches_target,
+                    matches_archetype=matches_archetype,
+                    match_reason=reason,
+                )
+            )
+
+        # Stable order: highest priority first, then by name.
+        out.sort(key=lambda r: (-r.priority, r.provider_name))
+        return out
+
+
+def discover_default_providers() -> list[KernelProvider]:
+    """Collect kernel providers from the entry-point plugin registry.
+
+    Mirrors :func:`compgen.kernels.codegen_fallback._discover_providers`
+    but exposed publicly. The returned providers carry a synthesised
+    ``_compgen_source`` attribute (``"entry_point"``) so
+    :meth:`ProviderRegistry.applicable` can attribute them.
+    """
+    try:
+        from compgen.plugins import GROUP_KERNEL_PROVIDERS, discover_all, registry
+    except Exception:  # noqa: BLE001
+        return []
+
+    discover_all()
+    out: list[KernelProvider] = []
+    for plugin in registry().get(GROUP_KERNEL_PROVIDERS):
+        obj = plugin.object
+        try:
+            if isinstance(obj, type):
+                instance = obj()
+            elif callable(obj) and not all(
+                hasattr(obj, m) for m in ("name", "accepts_contract", "search")
+            ):
+                instance = obj()
+            else:
+                instance = obj
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "registry.provider_instantiate_failed",
+                plugin_name=plugin.name,
+                error=str(exc),
+            )
+            continue
+        try:
+            object.__setattr__(instance, "_compgen_source", "entry_point")
+        except Exception:  # noqa: BLE001
+            pass
+        out.append(instance)
+    return out
+
+
+def default_registry() -> ProviderRegistry:
+    """Build the default :class:`ProviderRegistry` for Phase D.
+
+    Loads entry-point providers via :func:`discover_default_providers`.
+    The Claude-Code subagent path is *not* registered here — that
+    integration lands in M-56 (when the ``bid()`` interface is
+    introduced). Callers that want to add the in-session subagent today
+    register a sentinel via :meth:`ProviderRegistry.register` themselves.
+    """
+    reg = ProviderRegistry()
+    for p in discover_default_providers():
+        reg.register(p)
+    return reg
+
+
+__all__ = [
+    "ProviderApplicability",
+    "ProviderRegistry",
+    "default_registry",
+    "discover_default_providers",
+]
