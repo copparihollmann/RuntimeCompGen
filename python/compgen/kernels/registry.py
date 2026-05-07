@@ -28,12 +28,15 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from compgen.kernels.provider import (
+    BidPreview,
     ContractFeedback,
     KernelContract,
     KernelProvider,
     KnowledgeExport,
+    ProviderProtocolViolation,
     ProviderResult,
     SearchBudget,
+    make_default_bid,
 )
 
 if TYPE_CHECKING:
@@ -342,6 +345,162 @@ class ProviderRegistry:
         return out
 
 
+# ===========================================================================
+# M-56 — bid() invocation with legacy fallback
+# ===========================================================================
+
+
+def _validate_bid(bid: BidPreview, *, expected_hash: str) -> None:
+    """Type-check a :class:`BidPreview` returned by a provider.
+
+    Raises :class:`ProviderProtocolViolation` on any structural
+    violation. Bid honesty (i.e. whether ``perf_estimate_us`` reflects
+    reality) is not checked here — the auction trusts the bid only as
+    a ranking signal; the contract-driven verifier (M-44) catches
+    real-world divergence on the fulfilled artifact.
+    """
+    import math
+
+    if not isinstance(bid, BidPreview):
+        raise ProviderProtocolViolation(
+            f"bid() must return BidPreview; got {type(bid).__name__}"
+        )
+    if not bid.provider_name:
+        raise ProviderProtocolViolation("BidPreview.provider_name must not be empty")
+    if math.isnan(bid.confidence) or bid.confidence < 0.0 or bid.confidence > 1.0:
+        raise ProviderProtocolViolation(
+            f"BidPreview.confidence must be in [0, 1]; got {bid.confidence!r}"
+        )
+    if math.isnan(bid.perf_estimate_us):
+        raise ProviderProtocolViolation(
+            "BidPreview.perf_estimate_us must not be NaN; use +inf for 'no estimate'"
+        )
+    if bid.perf_estimate_us < 0.0:
+        raise ProviderProtocolViolation(
+            f"BidPreview.perf_estimate_us must be non-negative; got {bid.perf_estimate_us!r}"
+        )
+    if bid.time_to_generate_s_estimate < 0.0 or math.isnan(
+        bid.time_to_generate_s_estimate
+    ):
+        raise ProviderProtocolViolation(
+            "BidPreview.time_to_generate_s_estimate must be non-negative finite"
+        )
+    if bid.registers_used < 0:
+        raise ProviderProtocolViolation("BidPreview.registers_used must be non-negative")
+    if bid.smem_bytes < 0:
+        raise ProviderProtocolViolation("BidPreview.smem_bytes must be non-negative")
+    if math.isnan(bid.occupancy) or bid.occupancy < 0.0 or bid.occupancy > 1.0:
+        raise ProviderProtocolViolation(
+            f"BidPreview.occupancy must be in [0, 1]; got {bid.occupancy!r}"
+        )
+    if bid.contract_hash and bid.contract_hash != expected_hash:
+        raise ProviderProtocolViolation(
+            f"BidPreview.contract_hash mismatch: "
+            f"provider returned {bid.contract_hash!r}, expected {expected_hash!r}"
+        )
+
+
+def compute_bid(
+    provider: KernelProvider,
+    contract_v3: KernelContractV3,
+    *,
+    expected_hash: str | None = None,
+) -> BidPreview:
+    """Invoke ``provider.bid(contract_v3)`` with legacy fallback.
+
+    Args:
+        provider: The provider to query.
+        contract_v3: The materialized V3 contract.
+        expected_hash: Pre-computed canonical contract hash. If
+            ``None``, computed via
+            :func:`compgen.promotion.contract_hash.hash_contract`.
+            Pass it in when calling for many providers in a row to
+            avoid re-hashing.
+
+    Returns:
+        A validated :class:`BidPreview`. If the provider has no
+        ``bid()`` method or returns ``None``, a placeholder bid is
+        returned with ``confidence=0.0`` and ``rationale="no_bid_method"``.
+
+    Raises:
+        ProviderProtocolViolation: When the provider's ``bid()`` raises
+            a typed protocol violation, or returns a malformed
+            :class:`BidPreview`. Provider-internal exceptions of any
+            other kind are caught and converted into a low-confidence
+            placeholder bid (so a single buggy provider does not abort
+            the auction).
+    """
+    if expected_hash is None:
+        try:
+            from compgen.promotion.contract_hash import hash_contract
+
+            expected_hash = hash_contract(contract_v3)
+        except Exception:  # noqa: BLE001
+            expected_hash = ""
+
+    bid_method = getattr(provider, "bid", None)
+    if bid_method is None or not callable(bid_method):
+        return make_default_bid(
+            provider_name=provider.name,
+            contract_hash=expected_hash or "",
+            rationale="no_bid_method",
+        )
+
+    try:
+        bid = bid_method(contract_v3)
+    except ProviderProtocolViolation:
+        # Typed protocol error from the provider itself — surface up.
+        raise
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "provider.bid.error",
+            provider=provider.name,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return make_default_bid(
+            provider_name=provider.name,
+            contract_hash=expected_hash or "",
+            rationale=f"bid_raised:{type(exc).__name__}",
+        )
+
+    if bid is None:
+        return make_default_bid(
+            provider_name=provider.name,
+            contract_hash=expected_hash or "",
+            rationale="bid_returned_none",
+        )
+
+    _validate_bid(bid, expected_hash=expected_hash or bid.contract_hash)
+
+    # Stamp the canonical hash if the provider didn't supply one.
+    if not bid.contract_hash and expected_hash:
+        from dataclasses import replace
+
+        bid = replace(bid, contract_hash=expected_hash)
+
+    return bid
+
+
+def collect_bids(
+    providers: list[KernelProvider],
+    contract_v3: KernelContractV3,
+) -> list[BidPreview]:
+    """Run :func:`compute_bid` over a list of applicable providers.
+
+    Hashes the contract once and reuses the canonical hash for every
+    provider. Returns the bids in the input order; the auction (M-57)
+    is responsible for ranking them.
+    """
+    try:
+        from compgen.promotion.contract_hash import hash_contract
+
+        expected_hash = hash_contract(contract_v3)
+    except Exception:  # noqa: BLE001
+        expected_hash = ""
+
+    return [compute_bid(p, contract_v3, expected_hash=expected_hash) for p in providers]
+
+
 def discover_default_providers() -> list[KernelProvider]:
     """Collect kernel providers from the entry-point plugin registry.
 
@@ -401,6 +560,8 @@ def default_registry() -> ProviderRegistry:
 __all__ = [
     "ProviderApplicability",
     "ProviderRegistry",
+    "collect_bids",
+    "compute_bid",
     "default_registry",
     "discover_default_providers",
 ]
