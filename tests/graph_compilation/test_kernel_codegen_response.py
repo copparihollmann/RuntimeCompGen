@@ -60,22 +60,84 @@ def merlin_task(tmp_path_factory) -> dict:  # type: ignore[no-untyped-def]
     }
 
 
+def _contract_compliant_metadata(request_body: dict) -> dict:
+    """Read the materialised contract and emit metadata that satisfies
+    M-44's contract-driven obligations. Real providers will derive
+    these the same way."""
+    full_path = Path(request_body["contract_paths"]["full"])
+    return _metadata_from_contract_path(full_path)
+
+
+def _metadata_from_contract_path(rel_path: Path) -> dict:
+    # Tests that have run_dir context resolve the path; here we assume
+    # the caller passes a relative path that the helper resolves.
+    return {}
+
+
 def _write_minimal_artifacts(run_dir: Path, request_body: dict) -> dict[str, str]:
-    """Helper: drop placeholder files into the sandboxed artifact_dir
-    so ``schema_invalid`` doesn't fire on missing-file. Returns the
-    artifacts dict the response will declare."""
+    """Helper: drop M-44-compliant artifacts into the sandboxed
+    artifact_dir. Returns the artifacts dict the response declares."""
     artifact_dir = run_dir / request_body["artifact_dir"]
     artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    # Read the materialised contract to derive matching metadata.
+    contract_full = run_dir / request_body["contract_paths"]["full"]
+    contract = json.loads(contract_full.read_text(encoding="utf-8"))
+    io = contract["io"]
+    metadata = {
+        "inputs": [
+            {"dims": list(t["shape"]["dims"]),
+             "dtype": t["dtype_class"][0],
+             "layout": t["layout"]}
+            for t in io["inputs"]
+        ],
+        "outputs": [
+            {"dims": list(t["shape"]["dims"]),
+             "dtype": t["dtype_class"][0],
+             "layout": t["layout"]}
+            for t in io["outputs"]
+        ],
+        "accumulator_dtype": io["numerics"]["accumulator_dtype"],
+        "target_name": (
+            (contract["orchestration"]["execution"] or {})
+            .get("hardware", {}).get("target_name", "")
+        ),
+        "signals_emitted": {
+            e["name"]: e["wait_count"]
+            for e in contract["orchestration"]["sync"].get("event_decls") or []
+        },
+    }
+    dispatch_model = contract["orchestration"]["dispatch"]["model"]
+    claims = {
+        "backend": request_body["allowed_backends"][0],
+        "supports_dispatch": [dispatch_model],
+        "expected_numerics": "bit_equality",
+        "estimated_registers": 0,
+        "estimated_smem_bytes": 0,
+    }
+
     artifacts = {}
     for name in request_body["required_outputs"]:
-        # Write a tiny placeholder per output. Real providers write
-        # actual kernel source / metadata / etc.
         ext = ".c" if name == "kernel_source" else ".json"
         path = artifact_dir / f"{name}{ext}"
-        if ext == ".json":
-            path.write_text("{}\n", encoding="utf-8")
+        if name == "kernel_metadata":
+            path.write_text(
+                json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        elif name == "provider_claims":
+            path.write_text(
+                json.dumps(claims, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        elif name == "launch_config":
+            path.write_text(
+                json.dumps({"grid": [1, 1, 1], "block": [1, 1, 1]},
+                           indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
         else:
-            path.write_text("/* placeholder */\n", encoding="utf-8")
+            path.write_text("/* placeholder kernel source */\n", encoding="utf-8")
         artifacts[name] = str(path.relative_to(run_dir))
     return artifacts
 
@@ -171,11 +233,14 @@ class TestProtocolFatalFailures:
     ) -> None:
         run_dir = tmp_path / "rd"
         shutil.copytree(merlin_task["run_dir"], run_dir)
-        # Delete the materialised contract file — simulates "the
-        # provider modified or removed the contract".
+        # Write the response artifacts FIRST (needs the contract to
+        # derive matching metadata)...
+        body = _good_response(run_dir, merlin_task["request_body"])
+        # ... then delete the materialised contract — simulates "the
+        # provider modified or removed the contract" between request
+        # emit and commit.
         full = run_dir / merlin_task["request_body"]["contract_paths"]["full"]
         full.unlink()
-        body = _good_response(run_dir, merlin_task["request_body"])
         result = commit_response(
             run_dir=run_dir, task_id=merlin_task["task_id"], response=body,
         )
@@ -323,8 +388,15 @@ class TestAcceptedResponse:
             run_dir=run_dir, task_id=merlin_task["task_id"], response=body,
         )
         assert result.accepted is True, result.failure_summary
-        # M-44 lands the verifier; until then next_action=verifier_pending.
-        assert result.next_action == "verifier_pending"
+        # M-44 verifier ran; "verified" or "verifier_pending" depending on
+        # whether all obligations short-circuit on metadata or stay deferred.
+        assert result.next_action in ("verified", "verifier_pending"), (
+            f"unexpected next_action {result.next_action!r}"
+        )
+        # M-44 wrote a validation report.
+        validation_dir = run_dir / "04_kernel_codegen" / "validation"
+        assert validation_dir.is_dir()
+        assert any(validation_dir.iterdir())
         # No retry / failure report.
         assert not (
             run_dir / "04_kernel_codegen" / "kernel_codegen_retry_request.json"

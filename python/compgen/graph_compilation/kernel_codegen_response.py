@@ -571,14 +571,86 @@ def commit_response(
 
     # Decide next action.
     if result.accepted:
-        # M-44 (verifier) lands later; until then, route to
-        # verifier_pending. M-45 writes the certificate when
-        # verification passes.
+        # M-44: run the contract-driven verifier checklist. The
+        # verifier reads the M-40 materialised contract + the
+        # provider's kernel_metadata + claims, generates obligations
+        # from contract fields, and writes a validation report.
+        verification = _run_m44_verifier(
+            run_dir=run_dir, task_id=task_id,
+            request_body=request_body,
+            response_body=response if isinstance(response, dict) else None,
+        )
+        if verification is None:
+            # Verifier itself errored — degrade gracefully.
+            return CommitResult(
+                accepted=True, task_id=task_id, attempt_index=attempt_index,
+                next_action="verifier_pending",
+                attempt_dir=str(attempt_dir.relative_to(run_dir)),
+            )
+        if verification["overall"] == "fail":
+            # The provider passed schema/sandbox/contract checks but
+            # the contract-derived verifier rejected. Treat as a
+            # recoverable provider failure; emit a retry request with
+            # the typed failure_kind from the verifier.
+            verifier_failure_kind = verification.get(
+                "failure_kind", "metadata_mismatch",
+            ) or "metadata_mismatch"
+            verifier_summary = verification.get("failure_summary", "")
+            verifier_result = ValidationResult(
+                accepted=False,
+                failure_kind=verifier_failure_kind,
+                failure_summary=verifier_summary,
+                recoverability=RECOVERABILITY.get(
+                    verifier_failure_kind,
+                    "recoverable_provider_failure",
+                ),
+                evidence_paths={
+                    "validation_report": verification["validation_report_path"],
+                },
+            )
+            if attempt_index + 1 >= max_attempts:
+                retry_path = _emit_retry_request(
+                    run_dir=run_dir, task_id=task_id,
+                    request_body=request_body,
+                    attempt_index=attempt_index, result=verifier_result,
+                    kind="exhausted", max_attempts=max_attempts,
+                )
+                return CommitResult(
+                    accepted=False, task_id=task_id,
+                    attempt_index=attempt_index,
+                    failure_kind="kernel_codegen_attempts_exhausted",
+                    failure_summary=verifier_summary,
+                    recoverability="protocol_or_contract_fatal",
+                    next_action="fatal_reject",
+                    attempt_dir=str(attempt_dir.relative_to(run_dir)),
+                    retry_request_path=str(retry_path.relative_to(run_dir)),
+                )
+            retry_path = _emit_retry_request(
+                run_dir=run_dir, task_id=task_id,
+                request_body=request_body,
+                attempt_index=attempt_index, result=verifier_result,
+                kind="retry", max_attempts=max_attempts,
+            )
+            return CommitResult(
+                accepted=False, task_id=task_id,
+                attempt_index=attempt_index,
+                failure_kind=verifier_failure_kind,
+                failure_summary=verifier_summary,
+                recoverability=verifier_result.recoverability,
+                next_action="retry",
+                attempt_dir=str(attempt_dir.relative_to(run_dir)),
+                retry_request_path=str(retry_path.relative_to(run_dir)),
+            )
+
+        # Verification accepted (overall=pass or pass+deferred). M-45
+        # writes the certificate next.
         return CommitResult(
-            accepted=True,
-            task_id=task_id,
-            attempt_index=attempt_index,
-            next_action="verifier_pending",
+            accepted=True, task_id=task_id, attempt_index=attempt_index,
+            next_action=(
+                "verified"
+                if verification["overall"] == "pass"
+                else "verifier_pending"
+            ),
             attempt_dir=str(attempt_dir.relative_to(run_dir)),
         )
 
@@ -632,6 +704,214 @@ def commit_response(
         recoverability=rec, next_action="retry",
         attempt_dir=str(attempt_dir.relative_to(run_dir)),
         retry_request_path=str(retry_path.relative_to(run_dir)),
+    )
+
+
+def _run_m44_verifier(
+    *,
+    run_dir: Path,
+    task_id: str,
+    request_body: dict[str, Any],
+    response_body: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Run the M-44 contract-driven verifier on an accepted response.
+
+    Returns ``{overall, failure_kind, failure_summary, validation_report_path}``
+    on completion (pass or fail), or ``None`` if the verifier itself
+    couldn't run (e.g. the materialised contract is missing — a
+    different code path's job to surface).
+    """
+    if response_body is None:
+        return None
+    try:
+        from compgen.kernels.contract_verifier import (
+            verify_kernel,
+            write_validation_report,
+        )
+        from compgen.kernels.contract_v3 import KernelContractV3
+    except Exception:  # noqa: BLE001 — be defensive about dialect import
+        return None
+
+    # Re-load the materialised KernelContractV3. The contract file
+    # already passed validate_response's contract_mutation check.
+    contract_path = (
+        run_dir / request_body["contract_paths"]["full"]
+    )
+    body = _read_json_or_none(contract_path)
+    if body is None:
+        return None
+    # Reconstruct the contract from disk. We use the same code path
+    # M-40 used to write it, but inverted — read the canonicalised
+    # JSON and re-materialise. To keep M-44 honest we re-run
+    # from_recipe with the same inputs as M-40, OR we trust the
+    # serialised form. M-44 takes the trusted-serialisation path here:
+    # the contract file is already canonical and immutable per
+    # contract_mutation guard.
+    try:
+        contract = _reconstruct_contract_from_dict(body)
+    except Exception:  # noqa: BLE001
+        return None
+
+    artifacts = response_body.get("artifacts") or {}
+    metadata_rel = artifacts.get("kernel_metadata", "")
+    claims_rel = artifacts.get("provider_claims", "")
+    metadata_path = (run_dir / metadata_rel) if metadata_rel else None
+    claims_path = (run_dir / claims_rel) if claims_rel else None
+
+    report = verify_kernel(
+        contract=contract,
+        task_id=task_id,
+        contract_hash=request_body.get("contract_hash", ""),
+        kernel_metadata_path=metadata_path,
+        provider_claims_path=claims_path,
+    )
+    report_path = write_validation_report(
+        run_dir=run_dir, task_id=task_id, report=report,
+    )
+    return {
+        "overall": report.overall,
+        "failure_kind": report.failure_kind,
+        "failure_summary": report.failure_summary,
+        "validation_report_path": str(report_path.relative_to(run_dir)),
+    }
+
+
+def _reconstruct_contract_from_dict(body: dict[str, Any]) -> Any:
+    """Reconstruct a KernelContractV3 from its serialised form.
+
+    We use the same KernelContractV3 dataclasses + the same
+    KernelArchetype / DispatchModel / etc. enums. The serialised form
+    is what M-40's ``contract_to_dict`` produced; this is the
+    inverse.
+    """
+    from compgen.kernels.contract_v3 import (
+        AliasPair, BufferLifetime, ConcurrencyUnit, DispatchModel,
+        DispatchSpec, EventDecl, ExecutionEnvelope, FusionPolicy,
+        Granularity, HardwareEnvelope, IOContract, KernelArchetype,
+        KernelContractV3, LayoutKind, MemorySpec, MemoryTier,
+        NumericsSpec, ObservabilitySpec, OrchestrationSpec,
+        PaddingPolicy, PerformancePriority, ProviderHint, ShapeClass,
+        SelectionHints, StaticAttr, SyncSpec, TensorIO,
+    )
+
+    def _tio(t: dict[str, Any]) -> TensorIO:
+        s = t["shape"]
+        dims = tuple(d if d is not None else None for d in s["dims"])
+        max_dims = (
+            tuple(s["max_dims"]) if s.get("max_dims") else None
+        )
+        divis = (
+            tuple(s["divisibility"]) if s.get("divisibility") else None
+        )
+        return TensorIO(
+            name=t["name"],
+            shape=ShapeClass(
+                dims=dims, max_dims=max_dims, divisibility=divis,
+            ),
+            dtype_class=tuple(t["dtype_class"]),
+            layout=LayoutKind(t["layout"]),
+            alignment_bytes=t.get("alignment_bytes", 16),
+            broadcast_pattern=t.get("broadcast_pattern"),
+        )
+
+    io = body["io"]
+    io_obj = IOContract(
+        inputs=tuple(_tio(t) for t in io["inputs"]),
+        outputs=tuple(_tio(t) for t in io["outputs"]),
+        attributes=tuple(
+            StaticAttr(name=a["name"], value=a["value"])
+            for a in io.get("attributes") or []
+        ),
+        numerics=NumericsSpec(
+            accumulator_dtype=io["numerics"].get("accumulator_dtype"),
+            fast_math=io["numerics"].get("fast_math", False),
+            max_relative_error=io["numerics"].get("max_relative_error", 1e-3),
+            deterministic=io["numerics"].get("deterministic", True),
+        ),
+    )
+
+    o = body["orchestration"]
+    exe = o["execution"]
+    if exe is not None:
+        hw = exe["hardware"]
+        execution = ExecutionEnvelope(
+            hardware=HardwareEnvelope(
+                target_name=hw["target_name"],
+                vector_lanes=hw["vector_lanes"],
+                scratchpad_bytes=hw["scratchpad_bytes"],
+                register_bytes=hw["register_bytes"],
+                native_dtypes=tuple(hw["native_dtypes"]),
+                peak_bandwidth_gbps=hw["peak_bandwidth_gbps"],
+            ),
+            memory_budget_bytes=exe.get("memory_budget_bytes", 0),
+            concurrency_unit=ConcurrencyUnit(exe["concurrency_unit"]),
+            padding=PaddingPolicy(exe["padding"]),
+            priority=PerformancePriority(exe["priority"]),
+        )
+    else:
+        execution = None
+
+    sync_d = o["sync"]
+    sync_obj = SyncSpec(
+        event_decls=tuple(
+            EventDecl(
+                name=e["name"], scope=e["scope"],
+                wait_count=e["wait_count"],
+            ) for e in sync_d.get("event_decls") or []
+        ),
+        wait_on=tuple(sync_d.get("wait_on") or ()),
+        aliasing=tuple(
+            AliasPair(input_idx=a["input_idx"], output_idx=a["output_idx"])
+            for a in sync_d.get("aliasing") or []
+        ),
+        blocking=sync_d.get("blocking", False),
+    )
+    mem_d = o["memory"]
+    memory = MemorySpec(
+        input_tiers=tuple(MemoryTier(t) for t in mem_d.get("input_tiers") or ()),
+        output_tiers=tuple(MemoryTier(t) for t in mem_d.get("output_tiers") or ()),
+        lifetimes=tuple(
+            BufferLifetime(output_idx=l["output_idx"], live_after=l["live_after"])
+            for l in mem_d.get("lifetimes") or []
+        ),
+        in_place_safe=mem_d.get("in_place_safe", False),
+    )
+    fusion = FusionPolicy(
+        is_boundary=o["fusion"].get("is_boundary", False),
+        fusable_with=tuple(o["fusion"].get("fusable_with") or ()),
+        prefer_inline_into=o["fusion"].get("prefer_inline_into"),
+    )
+    dispatch = DispatchSpec(
+        model=DispatchModel(o["dispatch"]["model"]),
+        max_concurrent_invocations=o["dispatch"].get("max_concurrent_invocations", 0),
+        retry_on_recoverable_error=o["dispatch"].get("retry_on_recoverable_error", False),
+    )
+    obs = ObservabilitySpec(
+        emit_dispatch_event=o["observability"].get("emit_dispatch_event", False),
+        emit_completion_event=o["observability"].get("emit_completion_event", False),
+        cost_emit_period=o["observability"].get("cost_emit_period", 0),
+    )
+    orchestration = OrchestrationSpec(
+        execution=execution, sync=sync_obj, memory=memory,
+        fusion=fusion, dispatch=dispatch, observability=obs,
+    )
+    selection = SelectionHints(
+        providers=tuple(
+            ProviderHint(
+                name=p["name"], weight=p.get("weight", 1.0),
+                rationale=p.get("rationale", ""),
+            )
+            for p in body.get("selection", {}).get("providers") or []
+        ),
+    )
+    return KernelContractV3(
+        op_name=body["op_name"],
+        archetype=KernelArchetype(body["archetype"]),
+        io=io_obj,
+        granularity=Granularity(body.get("granularity", "normal")),
+        orchestration=orchestration,
+        selection=selection,
+        metadata=dict(body.get("metadata") or {}),
     )
 
 
