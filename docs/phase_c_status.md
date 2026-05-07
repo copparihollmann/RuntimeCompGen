@@ -1,6 +1,6 @@
 # Phase C — Status
 
-_Last updated: 2026-05-07_  ·  _Current head: `ea69e04`_  ·  _Trust report: `/tmp/m44_trust/trust_report.md` (8/8 PASS at `0df601b`, 22 contracts)_
+_Last updated: 2026-05-07_  ·  _Current head: `62a2bc6`_  ·  _Trust report: `/tmp/m45_trust/trust_report.md` (8/8 PASS at `ea69e04`, 23 contracts)_
 
 This is the canonical Phase C tracker. Every Phase C milestone's done
 condition includes updating this document with the new commit hash,
@@ -48,7 +48,7 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 | M-42  | Kernel-codegen task emitter (supersedes M-39) | complete    | `cc428fe` | `python/compgen/graph_compilation/kernel_codegen.py`, `kernel_specialization.py` (deprecated shim), `run.py` + `__main__.py` (boundary + flag), `tests/graph_compilation/test_kernel_codegen_request.py`, `docs/realness/m42_kernel_codegen_task.yaml` | 23 (M-40+M-42), 6/6 models clean migration (no legacy dir leak), 5-phase real-driven stress green |
 | M-43  | Provider response schema + commit tool + 4 MCP tools | complete | `0df601b` | `python/compgen/graph_compilation/kernel_codegen_response.py`, `python/compgen/mcp/tools/kernel_codegen.py`, `tests/graph_compilation/test_kernel_codegen_response.py`, `docs/realness/m43_provider_response.yaml` | 14 (M-43), real-driven 4-phase end-to-end provider loop on merlin_mlp_wide (1 bug surfaced + fixed) |
 | M-44  | Contract-driven verifier checklist (LOAD-BEARING) | complete | `ea69e04` | `python/compgen/kernels/contract_verifier.py`, `graph_compilation/kernel_codegen_response.py` (M-44 hook + reconstruct_contract), `tests/kernels/test_contract_verifier.py`, `docs/realness/m44_contract_driven_verifier.yaml` | 12 (M-44), 46 across M-40..M-44, real-driven stress: 5/5 models verified end-to-end, tampered shape correctly typed |
-| M-45  | Kernel certificate                            | complete    | _pending_ | `python/compgen/kernels/kernel_certificate.py`, `graph_compilation/kernel_codegen_response.py` (M-45 hook on verified path), `mcp/tools/kernel_codegen.py` (inspect surfaces cert + validation), `tests/kernels/test_kernel_certificate.py`, `docs/realness/m45_kernel_certificate.yaml` | 12 (M-45) + 46 from M-40..M-44 (58 total kernel-track tests), 5/5 models emit cert + validate; tamper → typed artifact_hash_drift |
+| M-45  | Kernel certificate                            | complete    | `62a2bc6` | `python/compgen/kernels/kernel_certificate.py`, `graph_compilation/kernel_codegen_response.py` (M-45 hook on verified path), `mcp/tools/kernel_codegen.py` (inspect surfaces cert + validation), `tests/kernels/test_kernel_certificate.py`, `docs/realness/m45_kernel_certificate.yaml` | 12 (M-45) + 46 from M-40..M-44 (58 total kernel-track tests), 5/5 models emit cert + validate; tamper → typed artifact_hash_drift |
 | M-46  | Plan ↔ certified-kernels link                 | planned     | —       | —                                                                                     | —          |
 | M-47  | Python SYNC plan executor                     | planned     | —       | —                                                                                     | —          |
 | M-48  | Runtime plan assertions                       | planned     | —       | —                                                                                     | —          |
@@ -79,6 +79,7 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 
 Append-only log of full Phase C audit runs (commit + verdict + run path).
 
+- `62a2bc6` (2026-05-07, M-45 commit): trust report 8/8 PASS at `/tmp/m45_trust/trust_report.md` (23 contracts, 4 caveats, 9 negative controls). Real-driven stress: 5/5 models emit certificate; paper_claimable=True (no fallback); tamper test (edit kernel.c post-cert) → typed `artifact_hash_drift`. 58 tests across M-40..M-45 pass.
 - `ea69e04` (2026-05-07, M-44 commit): trust report 8/8 PASS at `/tmp/m44_trust/trust_report.md` (22 contracts, 4 caveats, 9 negative controls). Real-driven stress: 5/5 models verified end-to-end with 16 typed obligations each; tamper test (wrong shape) → typed shape_mismatch + retry. 46 tests across M-40..M-44 pass.
 - `0df601b` (2026-05-07, M-43 commit): trust report 8/8 PASS at `/tmp/m43_trust/trust_report.md` (21 contracts, 4 caveats, 9 negative controls). Real-driven stress: 4-phase end-to-end provider loop on merlin_mlp_wide (invalid JSON → schema_invalid+retry; contract_hash mismatch → fatal; sandbox escape → fatal; well-formed → accepted+verifier_pending). 1 bug surfaced + fixed.
 - `cc428fe` (2026-05-07, M-42 commit): trust report 8/8 PASS at `/tmp/m42_trust/trust_report.md` (20 contracts, 4 caveats, 9 negative controls). Real-driven stress: 5 phases (clean migration, request schema fidelity, sandbox readiness, kernel_facing leakage on disk, alias compat). 6/6 models clean migration (no legacy 04_kernel_specialization/ leak).
