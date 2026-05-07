@@ -545,13 +545,36 @@ def discover_default_providers() -> list[KernelProvider]:
 def default_registry() -> ProviderRegistry:
     """Build the default :class:`ProviderRegistry` for Phase D.
 
-    Loads entry-point providers via :func:`discover_default_providers`.
-    The Claude-Code subagent path is *not* registered here — that
-    integration lands in M-56 (when the ``bid()`` interface is
-    introduced). Callers that want to add the in-session subagent today
-    register a sentinel via :meth:`ProviderRegistry.register` themselves.
+    Registers (in priority order):
+
+    1. ``CReferenceProvider`` (in-tree, deterministic cffi-C matmul
+       baseline; always-on so the auction has at least one bidder for
+       host_cpu matmul contracts).
+    2. Entry-point providers via :func:`discover_default_providers`.
+
+    The Claude-Code subagent path is not registered here — its bid is
+    cache-aware (M-56) and is added explicitly by callers that want
+    in-session codegen. Tests inject stubs via a fresh
+    ``ProviderRegistry()`` rather than this default.
     """
     reg = ProviderRegistry()
+
+    # In-tree baseline.
+    try:
+        from compgen.kernels.providers.c_reference import CReferenceProvider
+
+        baseline = CReferenceProvider()
+        try:
+            object.__setattr__(baseline, "_compgen_source", "in_tree")
+        except Exception:  # noqa: BLE001
+            pass
+        reg.register(baseline)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "registry.c_reference_load_failed",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
     for p in discover_default_providers():
         reg.register(p)
     return reg
