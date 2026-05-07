@@ -1,6 +1,6 @@
 # Phase C — Status
 
-_Last updated: 2026-05-07_  ·  _Current head: `0c80c28`_  ·  _Trust report: `/tmp/m46_trust/trust_report.md` (8/8 PASS at `62a2bc6`, 24 contracts)_
+_Last updated: 2026-05-07_  ·  _Current head: `543edd4`_  ·  _Trust report: `/tmp/m47_trust/trust_report.md` (8/8 PASS at `0c80c28`, 25 contracts)_
 
 This is the canonical Phase C tracker. Every Phase C milestone's done
 condition includes updating this document with the new commit hash,
@@ -50,7 +50,7 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 | M-44  | Contract-driven verifier checklist (LOAD-BEARING) | complete | `ea69e04` | `python/compgen/kernels/contract_verifier.py`, `graph_compilation/kernel_codegen_response.py` (M-44 hook + reconstruct_contract), `tests/kernels/test_contract_verifier.py`, `docs/realness/m44_contract_driven_verifier.yaml` | 12 (M-44), 46 across M-40..M-44, real-driven stress: 5/5 models verified end-to-end, tampered shape correctly typed |
 | M-45  | Kernel certificate                            | complete    | `62a2bc6` | `python/compgen/kernels/kernel_certificate.py`, `graph_compilation/kernel_codegen_response.py` (M-45 hook on verified path), `mcp/tools/kernel_codegen.py` (inspect surfaces cert + validation), `tests/kernels/test_kernel_certificate.py`, `docs/realness/m45_kernel_certificate.yaml` | 12 (M-45) + 46 from M-40..M-44 (58 total kernel-track tests), 5/5 models emit cert + validate; tamper → typed artifact_hash_drift |
 | M-46  | Plan ↔ certified-kernels link                 | complete    | `0c80c28` | `python/compgen/runtime/execution_plan.py` (RegionKernelBinding + validate_with_run_dir), `python/compgen/graph_compilation/execution_plan_emit.py`, `run.py` + `__main__.py` (boundary + flag), `tests/runtime/test_region_kernel_binding.py`, `docs/realness/m46_plan_kernel_binding.yaml` | 10 (M-46) + 12 (M-45), 5/5 models flip unbound→bound on cert emit, tamper → typed artifact_hash_drift |
-| M-47  | Python SYNC plan executor                     | complete    | _pending_ | `python/compgen/runtime/glue_emit/{__init__,python_sync}.py`, `python/compgen/graph_compilation/run.py` (--stop-after glue-emit boundary), `tests/runtime/test_glue_emit_python_sync.py`, `docs/realness/m47_python_sync_executor.yaml` | 9 (M-47), real-driven stress: imported emitted module + ran compgen_run end-to-end, output=(16,32) Tensor |
+| M-47  | Python SYNC plan executor                     | complete    | `543edd4` | `python/compgen/runtime/glue_emit/{__init__,python_sync}.py`, `python/compgen/graph_compilation/run.py` (--stop-after glue-emit boundary), `tests/runtime/test_glue_emit_python_sync.py`, `docs/realness/m47_python_sync_executor.yaml` | 9 (M-47), real-driven stress: imported emitted module + ran compgen_run end-to-end, output=(16,32) Tensor |
 | M-48  | Runtime plan assertions                       | planned     | —       | —                                                                                     | —          |
 | M-49  | Glue differential — paper-facing              | planned     | —       | —                                                                                     | —          |
 | M-50  | SetDispatchMode as Recipe IR decision         | planned     | —       | —                                                                                     | —          |
@@ -79,6 +79,7 @@ Status legend: `planned` → `in_progress` → `complete` (tests green + commit 
 
 Append-only log of full Phase C audit runs (commit + verdict + run path).
 
+- `543edd4` (2026-05-07, M-47 commit): trust report 8/8 PASS at `/tmp/m47_trust/trust_report.md` (25 contracts, 4 caveats, 9 negative controls). Real-driven stress: pipeline → plan → glue-emit → import + RUN compgen_run on merlin_mlp_wide; dispatch_count=1, synchronize_called=True, output=Tensor(16,32). 9 tests for M-47, 18 across M-46+M-47.
 - `0c80c28` (2026-05-07, M-46 commit): trust report 8/8 PASS at `/tmp/m46_trust/trust_report.md` (24 contracts, 4 caveats, 9 negative controls). Real-driven stress: phase 1 (no provider) all 6 models unbound; phase 2 (with provider) 5/5 set_tile_params flip to bound; phase 3 (tamper) artifact_hash_drift fires. 22 tests across M-45+M-46.
 - `62a2bc6` (2026-05-07, M-45 commit): trust report 8/8 PASS at `/tmp/m45_trust/trust_report.md` (23 contracts, 4 caveats, 9 negative controls). Real-driven stress: 5/5 models emit certificate; paper_claimable=True (no fallback); tamper test (edit kernel.c post-cert) → typed `artifact_hash_drift`. 58 tests across M-40..M-45 pass.
 - `ea69e04` (2026-05-07, M-44 commit): trust report 8/8 PASS at `/tmp/m44_trust/trust_report.md` (22 contracts, 4 caveats, 9 negative controls). Real-driven stress: 5/5 models verified end-to-end with 16 typed obligations each; tamper test (wrong shape) → typed shape_mismatch + retry. 46 tests across M-40..M-44 pass.
