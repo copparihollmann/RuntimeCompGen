@@ -378,28 +378,18 @@ def build_kernel_specialization_request(
     )
     target_class = str(dossier.get("target_class") or target_id or "host_cpu")
 
-    # M-26 contract_hash. Reuse the existing derivation so M-44's
-    # cache uses the same index.
-    from compgen.graph_compilation.promotion_bridge import (
-        derive_contract_hash, derive_region_signature,
+    # M-41: canonical contract_hash via the materialised
+    # KernelContractV3 (hash_contract(view)). All hashing sites share
+    # this code path so promotion-write / promotion-read / agent-time
+    # retrieval derive byte-identical keys.
+    from compgen.graph_compilation.kernel_contract_materialization import (
+        hash_contract_from_run_dir,
     )
-
-    region_signature_fields: dict[str, str]
-    try:
-        _sig, region_signature_fields = derive_region_signature(
-            run_dir=run_dir, region_id=region_id, target_id=target_id,
-            kind=candidate_kind,
-        )
-    except Exception:  # noqa: BLE001 — degrade with explicit fields
-        region_signature_fields = {
-            "op_family": "matmul", "dtype": dtype,
-            "layout": "row_major",
-            "shape_class": f"{M_dim}x{N_dim}x{K_dim}",
-            "target_class": target_class,
-        }
-    contract_hash = derive_contract_hash(
+    contract_hash = hash_contract_from_run_dir(
+        run_dir=run_dir,
         candidate_selection=sel,
-        region_signature_fields=region_signature_fields,
+        region_id=region_id,
+        target_id=target_id,
     )
 
     backend = "triton" if "cuda" in target_class else "c_reference"

@@ -336,7 +336,78 @@ def kernel_facing_to_dict(view: KernelFacingView) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# Public emitter
+# In-memory materialization (M-41 — used by every contract_hash caller)
+# --------------------------------------------------------------------------- #
+
+
+def materialize_contract_from_run_dir(
+    *,
+    run_dir: Path,
+    candidate_selection: dict[str, Any],
+    region_id: str,
+    target_id: str,
+) -> KernelContractV3 | None:
+    """Materialize a ``KernelContractV3`` in memory from on-disk
+    artifacts, without writing the contract back to disk (M-41).
+
+    This is the single helper every ``hash_contract`` caller routes
+    through, so promotion-write, promotion-read, M-39's request emit,
+    and any future hashing site all derive from byte-identical
+    contract content.
+
+    Returns ``None`` for unsupported candidate kinds (today: anything
+    other than ``set_tile_params``). Callers fall back to an empty
+    string for the contract_hash in that case — region-signature-only
+    retrieval still works.
+    """
+    candidate_kind = candidate_selection.get("candidate_kind", "")
+    if candidate_kind != "set_tile_params":
+        return None
+    dossier_path = _resolve_region_dossier(run_dir, region_id)
+    if dossier_path is None:
+        return None
+    region_dossier = _read_json(dossier_path)
+    target_yaml_path = _resolve_target_profile(run_dir, target_id)
+    target_profile = (
+        _read_yaml_or_none(target_yaml_path) if target_yaml_path else {}
+    ) or {}
+    declared_refinement = _declared_refinement_for(
+        run_dir, candidate_selection.get("selected_candidate_id", "") or "",
+    )
+    try:
+        return KernelContractV3.from_recipe(
+            candidate_selection=candidate_selection,
+            region_dossier=region_dossier,
+            target_profile=target_profile,
+            declared_refinement=declared_refinement,
+        )
+    except ValueError:
+        return None
+
+
+def hash_contract_from_run_dir(
+    *,
+    run_dir: Path,
+    candidate_selection: dict[str, Any],
+    region_id: str,
+    target_id: str,
+) -> str:
+    """Convenience: materialize then hash. Returns empty string when
+    the contract cannot be materialized (unsupported kind, missing
+    dossier, etc.)."""
+    contract = materialize_contract_from_run_dir(
+        run_dir=run_dir,
+        candidate_selection=candidate_selection,
+        region_id=region_id,
+        target_id=target_id,
+    )
+    if contract is None:
+        return ""
+    return hash_contract(contract)
+
+
+# --------------------------------------------------------------------------- #
+# Public emitter (writes to disk)
 # --------------------------------------------------------------------------- #
 
 
