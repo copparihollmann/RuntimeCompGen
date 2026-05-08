@@ -51,18 +51,14 @@ def _invoke_pipeline(
 
 class TestSlice2:
     def test_proxy_vla_fusion_path(self, tmp_path: Path) -> None:
-        """Run the pipeline + emit slice evidence. proxy_vla's
-        candidate is a fusion (set_tile_params is M-42's only
-        supported kind today), so the request_kind comes back as
-        ``not_applicable``; the slice evidence records this as an
-        honest gap."""
+        """Run the pipeline + emit slice evidence. With gap #6 closed,
+        proxy_vla's fusion candidate produces a kernel_codegen
+        request; M-40 materialises a POINTWISE fused contract; the
+        auction runs with c_reference's pointwise baseline as bidder."""
         result = _invoke_pipeline(
             model="proxy_vla", out_dir=tmp_path / "run",
             stop_after="kernel-auction",
         )
-        # The pipeline runs through kernel-auction even when the
-        # M-42 task is not_applicable (the auction stage short-
-        # circuits). It should not error.
         assert result.returncode == 0, result.stderr
 
         from compgen.graph_compilation.phase_d_slice_evidence import (
@@ -73,23 +69,23 @@ class TestSlice2:
         evidence_path = emit_slice_evidence(
             run_dir=run_dir, slice_id="2", slice_name="proxy_vla_fusion",
             model="proxy_vla", target="host_cpu",
-            overall="honest_gap",
+            overall="green",
             overall_reason=(
-                "M-42 supports only candidate_kind='set_tile_params' today; "
-                "proxy_vla's recipe planner selects fusion candidates "
-                "which route to not_applicable. Auction never bids; "
-                "fusion-archetype contract registry expansion is the next "
-                "milestone."
+                "Gap #6 closure: fusion candidate produces a real "
+                "kernel_codegen request; auction runs and verifies. "
+                "Fusion-archetype contract carries POINTWISE archetype + "
+                "fused IO (producer input → consumer output)."
             ),
-            notes="See 04_kernel_codegen/kernel_codegen_summary.json::not_applicable_reason",
+            notes="See 04_kernel_codegen/contracts/<fusion_label>.<hash>.json",
         )
         body = json.loads(evidence_path.read_text())
 
         assert body["schema_version"] == "phase_d_slice_evidence_v1"
         assert body["slice_id"] == "2"
-        assert body["overall"] == "honest_gap"
-        # Auction didn't run (not_applicable request).
-        assert body["auction_summary"]["ran"] is False
+        assert body["overall"] == "green"
+        # Gap #6: auction now runs for fusion candidates.
+        assert body["auction_summary"]["ran"] is True
+        assert body["auction_summary"]["overall"] == "pass"
 
 
 # --------------------------------------------------------------------------- #
