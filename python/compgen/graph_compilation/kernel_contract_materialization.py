@@ -257,6 +257,13 @@ def contract_to_dict(c: KernelContractV3) -> dict[str, Any]:
                 for p in c.selection.providers
             ],
         },
+        # M-61 — typed pre/post-condition predicates.
+        "preconditions": [
+            p.to_dict() for p in (c.preconditions or ())
+        ],
+        "postconditions": [
+            p.to_dict() for p in (c.postconditions or ())
+        ],
         "metadata": dict(c.metadata),
     }
 

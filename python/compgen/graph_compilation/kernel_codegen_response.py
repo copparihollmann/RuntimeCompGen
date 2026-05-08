@@ -943,6 +943,12 @@ def _reconstruct_contract_from_dict(body: dict[str, Any]) -> Any:
             for p in body.get("selection", {}).get("providers") or []
         ),
     )
+    # M-61 — pre/post-condition predicates round-trip.
+    from compgen.kernels.predicates import predicates_from_list
+
+    preconditions = predicates_from_list(body.get("preconditions") or [])
+    postconditions = predicates_from_list(body.get("postconditions") or [])
+
     return KernelContractV3(
         op_name=body["op_name"],
         archetype=KernelArchetype(body["archetype"]),
@@ -950,6 +956,8 @@ def _reconstruct_contract_from_dict(body: dict[str, Any]) -> Any:
         granularity=Granularity(body.get("granularity", "normal")),
         orchestration=orchestration,
         selection=selection,
+        preconditions=preconditions,
+        postconditions=postconditions,
         metadata=dict(body.get("metadata") or {}),
     )
 

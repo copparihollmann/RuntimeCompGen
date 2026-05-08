@@ -605,6 +605,13 @@ class KernelContractV3:
     legacy: KernelContractV2 | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     contract_version: int = CONTRACT_VERSION
+    # M-61 — typed pre/post-condition predicates. Each entry is one of
+    # the dataclasses in :mod:`compgen.kernels.predicates`. The contract
+    # carries them as tuple[Any, ...] to avoid a forward import; the
+    # plan-assertion emitter and the verifier dispatch on
+    # ``predicate_kind(p)``.
+    preconditions: tuple[Any, ...] = ()
+    postconditions: tuple[Any, ...] = ()
 
     def __post_init__(self) -> None:
         self._check_archetype_invariants()
@@ -1006,6 +1013,34 @@ class KernelContractV3:
             )
         selection = SelectionHints(providers=providers)
 
+        # M-61 — typed pre/post-condition predicates.
+        # Preconditions: K must be a multiple of tile_K (the matmul
+        # kernel's inner-loop unroll requirement), and inputs must
+        # carry a recognised dtype.
+        from compgen.kernels.predicates import (
+            DtypeIn as _DtypeIn,
+        )
+        from compgen.kernels.predicates import (
+            ModEq as _ModEq,
+        )
+        from compgen.kernels.predicates import (
+            NumericalWithinEps as _NumericalWithinEps,
+        )
+
+        preconditions: tuple[Any, ...] = (
+            _ModEq(arg_dim="K", k=int(tile_K)),
+            _DtypeIn(arg="lhs", dtype_set=(dtype,)),
+            _DtypeIn(arg="rhs", dtype_set=(dtype,)),
+        )
+        # Postconditions: numerical equivalence within the declared
+        # refinement's eps. For bit_equality the eps is 0; for
+        # tolerance_eps the M-44 verifier will substitute the Higham
+        # bound at differential time.
+        post_eps = 0.0 if declared_refinement == "bit_equality" else max_rel_err
+        postconditions: tuple[Any, ...] = (
+            _NumericalWithinEps(out="out", ref="reference", eps=post_eps),
+        )
+
         return cls(
             op_name="linalg.matmul",
             archetype=KernelArchetype.COMPUTE_TILED,
@@ -1013,6 +1048,8 @@ class KernelContractV3:
             granularity=Granularity.NORMAL,
             orchestration=orchestration,
             selection=selection,
+            preconditions=preconditions,
+            postconditions=postconditions,
             metadata={
                 "source_candidate_id": candidate_selection.get(
                     "selected_candidate_id", ""
