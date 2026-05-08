@@ -233,6 +233,19 @@ def _build_parser() -> argparse.ArgumentParser:
             "COMPGEN_USER_KERNEL_PATH env var when the flag is omitted."
         ),
     )
+    run.add_argument(
+        "--kernel-coverage-mode",
+        choices=("both", "first-pass-coverage", "specialize", "disabled"),
+        default="both",
+        help=(
+            "M-63: coverage-first scheduling. both (default): coverage "
+            "+ specialization analysis after the auction. "
+            "first-pass-coverage: only the coverage report (canonical-"
+            "hash reuse → coverage-inflated bindings). specialize: only "
+            "the specialization report (regions ranked for follow-on "
+            "shape-specialized auction). disabled: no-op."
+        ),
+    )
 
     # run-suite (multi-model run from a YAML manifest)
     run_suite = sub.add_parser(
@@ -738,6 +751,7 @@ def _run_pipeline(
     resume_from: str | None = None,
     auction_mode: str = "multi-bidder",
     bid_cutoff: int = 3,
+    kernel_coverage_mode: str = "both",
 ) -> int:
     from compgen.graph_compilation.run import run_graph_compilation
 
@@ -782,6 +796,7 @@ def _run_pipeline(
         resume_from=resume_from,
         auction_mode=auction_mode,
         bid_cutoff=bid_cutoff,
+        kernel_coverage_mode=kernel_coverage_mode,
     )
     print(f"run_dir: {result.run_dir}")
     for s in result.stages:
@@ -1600,6 +1615,9 @@ def main(argv: list[str] | None = None) -> int:
                 resume_from=getattr(args, "resume_from", None),
                 auction_mode=getattr(args, "auction_mode", "multi-bidder"),
                 bid_cutoff=getattr(args, "bid_cutoff", 3),
+                kernel_coverage_mode=getattr(
+                    args, "kernel_coverage_mode", "both",
+                ),
             )
         if args.command == "lower":
             return _run_lower(args.capture_run, args.target, args.out, args.run_id)
