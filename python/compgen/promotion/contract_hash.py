@@ -54,6 +54,46 @@ def _normalize(obj: Any) -> Any:
     return obj
 
 
+# Gap #1 closure: tile-choice StaticAttrs (``tile_M``, ``tile_N``,
+# ``tile_K``) are candidate-selection artifacts injected by
+# ``KernelContractV3.from_recipe`` for traceability. They live in
+# ``io.attributes`` because the dataclass keeps a single attrs slot,
+# but they are NOT a kernel-shape fact: two regions with the same IO
+# shape but different selected tiles share a kernel under matching
+# tile choices. The canonical hash strips them so cross-model cache
+# leverage works.
+_TILE_ATTR_NAMES: frozenset[str] = frozenset({"tile_M", "tile_N", "tile_K"})
+
+
+def _strip_tile_attrs_in_payload(payload: Any) -> Any:
+    """Walk a normalised kernel-facing payload and remove tile_*
+    StaticAttr entries from any ``io.attributes`` list.
+
+    These are added by ``from_recipe`` for traceability but are NOT
+    kernel-shape facts (different tile choices for the same shape
+    should still share a kernel). Stripping them is the canonical-
+    hash-only fix for gap #1; the instance hash keeps them so the
+    M-43 commit path's strict invariant still holds.
+    """
+    if isinstance(payload, dict):
+        out: dict[str, Any] = {}
+        for k, v in payload.items():
+            if k == "attributes" and isinstance(v, list):
+                out[k] = [
+                    a for a in v
+                    if not (
+                        isinstance(a, dict)
+                        and str(a.get("name", "")) in _TILE_ATTR_NAMES
+                    )
+                ]
+            else:
+                out[k] = _strip_tile_attrs_in_payload(v)
+        return out
+    if isinstance(payload, list):
+        return [_strip_tile_attrs_in_payload(x) for x in payload]
+    return payload
+
+
 def _abstract_shape_dims_in_payload(payload: Any) -> Any:
     """Walk a normalized kernel-facing payload and rewrite every
     ``shape.dims`` entry through ``_abstract_dim`` so the resulting
@@ -102,12 +142,18 @@ def canonical_contract_hash(contract: KernelContractV3) -> str:
     Same projection as :func:`instance_contract_hash`, but every IO
     ``shape.dims`` entry is run through
     :func:`compgen.promotion.region_signature.encode_shape_class`
-    abstraction before hashing. This makes contracts that differ only
-    in concrete shape values within the same class collide on a single
+    abstraction before hashing AND tile-choice StaticAttrs
+    (``tile_M``/``tile_N``/``tile_K``) are stripped from
+    ``io.attributes`` (gap #1: tile choice is a candidate-selection
+    artifact, not a kernel-shape fact). This makes contracts that
+    differ only in concrete shape values OR selected-tile
+    annotations within the same shape class collide on a single
     canonical hash, enabling cross-model recipe-library lookup.
     """
     view = contract.kernel_facing()
-    payload = _abstract_shape_dims_in_payload(_normalize(view))
+    payload = _strip_tile_attrs_in_payload(
+        _abstract_shape_dims_in_payload(_normalize(view))
+    )
     encoded = json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     )
