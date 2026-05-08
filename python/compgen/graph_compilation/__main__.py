@@ -220,6 +220,19 @@ def _build_parser() -> argparse.ArgumentParser:
             "auction_report.json. Default 3."
         ),
     )
+    run.add_argument(
+        "--user-kernel-path",
+        type=Path,
+        default=None,
+        help=(
+            "M-62: directory containing user-supplied kernel manifests "
+            "(``kernel_manifest.yaml`` + sibling kernel source files). "
+            "When set, re-indexes the directory under "
+            ".compgen/user_kernel_index/ before the auction runs so "
+            "UserKernelProvider can bid. Falls back to the "
+            "COMPGEN_USER_KERNEL_PATH env var when the flag is omitted."
+        ),
+    )
 
     # run-suite (multi-model run from a YAML manifest)
     run_suite = sub.add_parser(
@@ -1555,6 +1568,25 @@ def main(argv: list[str] | None = None) -> int:
                     dry_run=getattr(args, "llm_live_dry_run", False),
                     fallback=getattr(args, "llm_live_fallback", "none"),
                 )
+            # M-62: re-index user-supplied kernels before the run
+            # (auction picks them up via default_registry()).
+            user_kernel_path = getattr(args, "user_kernel_path", None)
+            try:
+                from compgen.kernels.user_kernel_index import (
+                    default_index_root,
+                    reindex,
+                    resolve_user_kernel_path,
+                )
+
+                resolved_path = resolve_user_kernel_path(cli_path=user_kernel_path)
+                if resolved_path is not None and resolved_path.exists():
+                    reindex(
+                        search_path=resolved_path,
+                        index_root=default_index_root(),
+                    )
+            except Exception:  # noqa: BLE001 — best-effort; surfaced via MCP discover tool
+                pass
+
             return _run_pipeline(
                 args.model, args.target, args.out, args.stop_after, args.run_id,
                 extension_registry=args.extension_registry,
