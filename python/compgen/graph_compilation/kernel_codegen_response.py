@@ -867,6 +867,20 @@ def _reconstruct_contract_from_dict(body: dict[str, Any]) -> Any:
                 register_bytes=hw["register_bytes"],
                 native_dtypes=tuple(hw["native_dtypes"]),
                 peak_bandwidth_gbps=hw["peak_bandwidth_gbps"],
+                # M-60 — extended hardware envelope (defaults preserve
+                # backward compatibility with pre-M-60 cert bodies).
+                codegen_hints=tuple(hw.get("codegen_hints") or ()),
+                mma_shapes={
+                    str(k): (int(v[0]), int(v[1]), int(v[2]))
+                    for k, v in (hw.get("mma_shapes") or {}).items()
+                    if v and len(v) == 3
+                },
+                peak_compute_per_dtype={
+                    str(k): float(v)
+                    for k, v in (hw.get("peak_compute_per_dtype") or {}).items()
+                },
+                register_quota_per_thread=int(hw.get("register_quota_per_thread", 256)),
+                max_concurrent_blocks=int(hw.get("max_concurrent_blocks", 0)),
             ),
             memory_budget_bytes=exe.get("memory_budget_bytes", 0),
             concurrency_unit=ConcurrencyUnit(exe["concurrency_unit"]),
