@@ -99,18 +99,43 @@ def _abstract_shape_dims_in_payload(payload: Any) -> Any:
     ``shape.dims`` entry through ``_abstract_dim`` so the resulting
     JSON encodes shape-class form rather than concrete dims.
 
-    Concrete int dims pass through unchanged; ``None`` becomes
-    ``{"dynamic": true}``; pre-abstracted ``{"mod": k}`` /
-    ``{"dynamic": true}`` are normalised. The walk only rewrites the
-    ``dims`` list inside any nested ``shape`` dict — every other
-    field in the projection is preserved verbatim.
+    Gap #9 closure: when ``shape.divisibility[i]`` is non-None, the
+    canonical projection rewrites ``dims[i]`` to ``{"mod": k}``
+    instead of the concrete int. Two regions with concrete dims
+    K=32 and K=64, both declared divisible by 16, then collide on
+    canonical hash.
+
+    Concrete int dims with no divisibility pass through unchanged;
+    ``None`` (no divisibility, dynamic) becomes ``{"dynamic": true}``.
     """
     if isinstance(payload, dict):
         out: dict[str, Any] = {}
         for k, v in payload.items():
             if k == "shape" and isinstance(v, dict) and "dims" in v:
                 inner = dict(v)
-                inner["dims"] = [_abstract_dim(d) for d in (v.get("dims") or [])]
+                dims = list(v.get("dims") or [])
+                divisibility = list(v.get("divisibility") or [])
+                abstracted: list[Any] = []
+                for i, d in enumerate(dims):
+                    div = (
+                        divisibility[i]
+                        if i < len(divisibility) and divisibility[i] is not None
+                        else None
+                    )
+                    if div is not None:
+                        abstracted.append({"mod": int(div)})
+                    else:
+                        abstracted.append(_abstract_dim(d))
+                inner["dims"] = abstracted
+                # Strip divisibility from the canonical projection
+                # ONLY when it's actually populated — the abstracted
+                # dims already encode it; keeping the field would
+                # double-count. When divisibility is None / empty,
+                # leave the field untouched so an unabstracted
+                # canonical projection on a no-divisibility shape
+                # still byte-matches a no-tile-attr instance.
+                if any(d is not None for d in divisibility):
+                    inner.pop("divisibility", None)
                 out[k] = inner
             else:
                 out[k] = _abstract_shape_dims_in_payload(v)

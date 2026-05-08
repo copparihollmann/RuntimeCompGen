@@ -752,6 +752,7 @@ class KernelContractV3:
         target_profile: dict[str, Any],
         declared_refinement: str = "unknown",
         dispatch_mode_override: str | None = None,
+        shape_policy: str = "concrete",
     ) -> "KernelContractV3":
         """Materialize a KernelContractV3 from a selected Recipe IR
         decision plus region facts (M-40 / Section 21).
@@ -859,23 +860,54 @@ class KernelContractV3:
         )
 
         # --- IO ---
+        # Gap #9: tile_M/tile_N/tile_K induce divisibility on the
+        # corresponding contract dims. The canonical hash reads
+        # divisibility (when set) so two regions with the same
+        # archetype + dtype + layout + target whose dims agree under
+        # the divisibility class share a kernel.
+        # Gap #14 (shape_policy="class"): substitute concrete dims with
+        # None so the canonical hash falls all the way to dynamic — one
+        # canonical kernel covers any concrete instantiation under the
+        # declared divisibility.
+        if shape_policy == "class":
+            lhs_dims_concrete: tuple[int | None, int | None] = (None, None)
+            rhs_dims_concrete: tuple[int | None, int | None] = (None, None)
+            out_dims_concrete: tuple[int | None, int | None] = (None, None)
+        elif shape_policy == "concrete":
+            lhs_dims_concrete = (M_dim, K_dim)
+            rhs_dims_concrete = (K_dim, N_dim)
+            out_dims_concrete = (M_dim, N_dim)
+        else:
+            raise ValueError(
+                f"unknown shape_policy {shape_policy!r}; expected "
+                f"'concrete' or 'class'"
+            )
         lhs = TensorIO(
             name="lhs",
-            shape=ShapeClass(dims=(M_dim, K_dim)),
+            shape=ShapeClass(
+                dims=lhs_dims_concrete,
+                divisibility=(tile_M, tile_K),
+            ),
             dtype_class=(dtype,),
             layout=LayoutKind.ROW_MAJOR,
             alignment_bytes=64,
         )
         rhs = TensorIO(
             name="rhs",
-            shape=ShapeClass(dims=(K_dim, N_dim)),
+            shape=ShapeClass(
+                dims=rhs_dims_concrete,
+                divisibility=(tile_K, tile_N),
+            ),
             dtype_class=(dtype,),
             layout=LayoutKind.ROW_MAJOR,
             alignment_bytes=64,
         )
         out = TensorIO(
             name="out",
-            shape=ShapeClass(dims=(M_dim, N_dim)),
+            shape=ShapeClass(
+                dims=out_dims_concrete,
+                divisibility=(tile_M, tile_N),
+            ),
             dtype_class=(dtype,),
             layout=LayoutKind.ROW_MAJOR,
             alignment_bytes=64,
@@ -1181,6 +1213,15 @@ class KernelContractV3:
             or "host_cpu"
         )
         envelope = target_profile.get("hardware_envelope") or {}
+        # Read mma_shapes from the target profile so the fusion path
+        # carries the same hardware envelope the matmul path does.
+        mma_shapes_dict: dict[str, tuple[int, int, int]] = {}
+        for k, v in (target_profile.get("mma_shapes") or {}).items():
+            try:
+                if v and len(v) == 3:
+                    mma_shapes_dict[str(k)] = (int(v[0]), int(v[1]), int(v[2]))
+            except (TypeError, ValueError):
+                continue
         hardware = HardwareEnvelope(
             target_name=str(target_id),
             vector_lanes=int(envelope.get("vector_lanes", 8)),
@@ -1189,7 +1230,7 @@ class KernelContractV3:
             native_dtypes=tuple(envelope.get("native_dtypes") or (dtype,)),
             peak_bandwidth_gbps=float(envelope.get("peak_bandwidth_gbps", 0.0)),
             codegen_hints=tuple(target_profile.get("codegen_hints") or ()),
-            mma_shapes={},
+            mma_shapes=mma_shapes_dict,
             peak_compute_per_dtype={
                 str(k): float(v)
                 for k, v in (target_profile.get("peak_compute_per_dtype") or {}).items()

@@ -584,11 +584,20 @@ def materialize_contract_for_run(
             ) or {}
             declared_refinement = _declared_refinement_for(run_dir, candidate_id)
 
+            # Gap #14: COMPGEN_SHAPE_POLICY=class makes from_recipe
+            # substitute concrete dims with None so the canonical
+            # hash falls all the way to dynamic.
+            import os as _os
+
+            shape_policy = _os.environ.get("COMPGEN_SHAPE_POLICY", "concrete")
+            if shape_policy not in ("concrete", "class"):
+                shape_policy = "concrete"
             contract = KernelContractV3.from_recipe(
                 candidate_selection=sel,
                 region_dossier=region_dossier,
                 target_profile=target_profile,
                 declared_refinement=declared_refinement,
+                shape_policy=shape_policy,
             )
             ch = hash_contract(contract)
             contract_path = contracts_dir / f"{region_id}.{ch}.json"

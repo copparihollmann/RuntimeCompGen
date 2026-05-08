@@ -63,19 +63,34 @@ def _build_v3_matmul_with_tile(*, tile_n: int):
 
 
 class TestGap1CanonicalStripsTileAttrs:
-    def test_same_shape_different_tile_share_canonical(self) -> None:
+    def test_canonical_strips_tile_attrs_from_io_attributes(self) -> None:
+        """Direct test: build two contracts with identical io.shape +
+        identical io.shape.divisibility, but different tile_M/tile_N
+        StaticAttrs. The canonical hash strips the tile attrs so the
+        two contracts collide."""
+        from dataclasses import replace
+
+        from compgen.kernels.contract_v3 import StaticAttr
         from compgen.promotion.contract_hash import (
             canonical_contract_hash,
             instance_contract_hash,
         )
 
         c_a = _build_v3_matmul_with_tile(tile_n=16)
-        c_b = _build_v3_matmul_with_tile(tile_n=32)
+        # Surgical replace of just the tile_N StaticAttr — keep
+        # divisibility intact so gap #9 doesn't separate them.
+        new_attrs = []
+        for attr in c_a.io.attributes:
+            if attr.name == "tile_N":
+                new_attrs.append(StaticAttr(name="tile_N", value=99))
+            else:
+                new_attrs.append(attr)
+        c_b = replace(c_a, io=replace(c_a.io, attributes=tuple(new_attrs)))
 
         assert instance_contract_hash(c_a) != instance_contract_hash(c_b), \
-            "instance hash should differ — tile attrs are part of instance"
+            "instance hash differs — tile_N=16 vs 99 in io.attributes"
         assert canonical_contract_hash(c_a) == canonical_contract_hash(c_b), \
-            "canonical hash should match — tile attrs stripped"
+            "canonical hash matches — tile_M/tile_N/tile_K stripped"
 
 
 # --------------------------------------------------------------------------- #
