@@ -195,8 +195,8 @@ def _signature_from_certificate(*, run_dir: Path, cert: Any) -> str:
     its source contract file from disk.
 
     Gap #10 closure: archetype is read from the contract body so
-    pointwise + reduce certs sign correctly (was hardcoded
-    compute_tiled).
+    pointwise + reduce certs sign correctly (was previously
+    locked to compute_tiled).
     """
     contract_rel = getattr(cert, "contract_path", "") or ""
     if not contract_rel:
