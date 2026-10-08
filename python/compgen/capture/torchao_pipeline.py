@@ -108,6 +108,20 @@ def apply_quantization(model: Any, config: QuantizationConfig) -> Any:
         scheme_map["fp8"] = Float8WeightOnlyConfig
     except ImportError:
         pass
+    # int8 W + int8 A for systolic / RVV int8 datapaths (Gemmini, Saturn/OPU).
+    # Per-channel weights, per-tensor dynamic activations.
+    try:
+        from torchao.quantization import Int8DynamicActivationInt8WeightConfig
+
+        scheme_map["int8_dyn_act_int8_weight"] = Int8DynamicActivationInt8WeightConfig
+    except ImportError:
+        pass
+    try:
+        from torchao.quantization import Int8StaticActivationInt8WeightConfig
+
+        scheme_map["int8_static_act_int8_weight"] = Int8StaticActivationInt8WeightConfig
+    except ImportError:
+        pass
 
     # torchao <0.17: function-based API (fallback)
     if "int8_weight_only" not in scheme_map:

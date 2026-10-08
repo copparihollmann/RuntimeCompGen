@@ -22,6 +22,12 @@ resolution-markers = [
     "python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 
+[manifest]
+members = [
+    "compgen",
+    "compgen-tracker",
+]
+
 [[package]]
 name = "absl-py"
 version = "2.4.0"
@@ -562,6 +568,7 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
+    { name = "compgen-tracker" },
     { name = "jinja2" },
     { name = "jsonschema" },
     { name = "lerobot", version = "0.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -687,6 +694,7 @@ requires-dist = [
     { name = "compgen", extras = ["cuda"], marker = "extra == 'blackwell'" },
     { name = "compgen", extras = ["cuda"], marker = "extra == 'cuda-triton'" },
     { name = "compgen", extras = ["kernelblaster-sidecar"], marker = "extra == 'kernelblaster-rl'" },
+    { name = "compgen-tracker", editable = "packages/compgen-tracker" },
     { name = "cuda-python", marker = "extra == 'cuda'", specifier = ">=12.6" },
     { name = "fastapi", marker = "extra == 'kernelblaster-sidecar'", specifier = ">=0.110" },
     { name = "fastapi", marker = "extra == 'ray'", specifier = ">=0.110" },
@@ -748,6 +756,42 @@ requires-dist = [
     { name = "z3-solver", marker = "extra == 'solve'", specifier = ">=4.12" },
 ]
 provides-extras = ["llm", "dev", "solve", "solve-mosek", "quantization", "cuda", "cuda-triton", "blackwell", "benchmarks", "docs", "ray", "compile", "kernels", "kernelblaster-sidecar", "kernelblaster-rl", "demo"]
+
+[[package]]
+name = "compgen-tracker"
+version = "0.1.0"
+source = { editable = "packages/compgen-tracker" }
+dependencies = [
+    { name = "click" },
+    { name = "rich" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "ruff" },
+]
+genai = [
+    { name = "google-genai" },
+]
+openai = [
+    { name = "openai" },
+]
+yaml = [
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.1" },
+    { name = "google-genai", marker = "extra == 'genai'", specifier = ">=1.0" },
+    { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pyyaml", marker = "extra == 'yaml'", specifier = ">=6.0" },
+    { name = "rich", specifier = ">=13.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
+]
+provides-extras = ["yaml", "genai", "openai", "dev"]
 
 [[package]]
 name = "contourpy"

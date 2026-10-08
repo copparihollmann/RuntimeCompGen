@@ -32,6 +32,10 @@ from compgen.quantization.fp8_tensor import FP8E4M3Po2Tensor
 from compgen.quantization.graph_analyzer import QuantizedGraphAnalysis, analyze_for_npu, format_analysis_report
 from compgen.quantization.npu_op_map import NpuOpCategory, NpuQuantDecision, classify_op
 from compgen.quantization.pipeline import PipelineReport, QuantizedModelPipeline
+from compgen.quantization.smolvla_int8 import (
+    INT8_SCHEME as SMOLVLA_INT8_SCHEME,
+    run_smolvla_int8_pipeline,
+)
 from compgen.quantization.smolvla_recipe import (
     SmolVLAComponent,
     SmolVLAQuantRecipe,
@@ -68,6 +72,8 @@ __all__ = [
     "QuantizedGraphAnalysis",
     "QuantizedModelPipeline",
     "PipelineReport",
+    "SMOLVLA_INT8_SCHEME",
     "analyze_for_npu",
     "format_analysis_report",
+    "run_smolvla_int8_pipeline",
 ]

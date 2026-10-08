@@ -1,4 +1,4 @@
-"""Tests for compgen.observability.gemini_usage."""
+"""Tests for compgen_tracker.gemini_usage."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from compgen.observability import gemini_usage as gu
+from compgen_tracker import gemini_usage as gu
 
 
 @pytest.fixture
@@ -149,7 +149,7 @@ def _writer(storage_dir: str, n: int) -> None:
     os.environ["COMPGEN_GEMINI_USAGE_DIR"] = storage_dir
     os.environ["COMPGEN_REPO_ROOT"] = storage_dir
     # Re-import so child uses fresh env-resolved paths.
-    from compgen.observability import gemini_usage as child_gu
+    from compgen_tracker import gemini_usage as child_gu
     for _ in range(n):
         child_gu.record_call("gemini-2.5-flash", 100, 10, source="concurrent")
 

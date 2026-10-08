@@ -40,6 +40,11 @@ dependencies = [
     "torchvision>=0.25.0",
     "num2words>=0.5.14",
     "lerobot>=0.4.4",
+    # Gemini usage + cost + budget tracker. Carved out so downstream
+    # repos (xpu-rt-integration, one-off experiments) can depend on
+    # just the tracker without the full CompGen stack. Lives in this
+    # repo as a uv workspace member at packages/compgen-tracker/.
+    "compgen-tracker>=0.1",
 ]
 
 [project.optional-dependencies]
@@ -176,7 +181,7 @@ demo = [
 compgen = "compgen.cli:main"
 compgen-mcp = "compgen.mcp.server:main"
 compgen-run-conformance = "compgen.testing.etc_conformance:_cli"
-compgen-gemini-usage = "compgen.observability.cli:main"
+compgen-gemini-usage = "compgen_tracker.cli:main"
 # Generic ToolCard runner. Alias for ``compgen tool …`` so every
 # registered tool gets a stable, audit-checkable CLI entry.
 compgen-tool = "compgen.cli:tool_main"
@@ -212,6 +217,17 @@ Issues = "https://github.com/compgen-project/compgen/issues"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# uv workspace: declare the in-tree sibling packages so their editable
+# installs resolve via path rather than PyPI. compgen-tracker is the
+# Gemini-usage tracker carved out at packages/compgen-tracker/. Any
+# additional sibling package added under packages/ is picked up
+# automatically.
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+compgen-tracker = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["python/compgen"]

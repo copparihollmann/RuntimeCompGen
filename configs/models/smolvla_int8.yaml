@@ -1,0 +1,50 @@
+schema_version: model_config_v1
+model_id: smolvla_int8
+family: vla
+source:
+  provider: huggingface
+  model_ref: lerobot/smolvla_base
+  repo_url: https://huggingface.co/lerobot/smolvla_base
+  docs_url: https://huggingface.co/lerobot/smolvla_base
+  revision: c83c3163b8ca9b7e67c509fffd9121e66cb96205
+  verified_at: '2026-05-15T00:00:00+00:00'
+  verified_by: agustin@garden
+  source_verified: true
+loader:
+  kind: compgen_model_spec
+  model_spec_id: smolvla_one_step
+  device_policy: auto
+inputs:
+  kind: one_step_policy
+  processor_required: false
+compile:
+  mode: torch_compile_admission
+  backend: inductor
+  fullgraph: false
+  dynamic: true
+quantization:
+  scheme: int8_dyn_act_int8_weight
+  weight_dtype: int8
+  weight_granularity: per_channel
+  activation_dtype: int8
+  activation_granularity: per_tensor_dynamic
+  rationale: |
+    int8/int8 matches Gemmini's elem_t=int8_t systolic input
+    (DIM=16, int32 accumulator) and Saturn/OPU's vsetvli e8 m1
+    int8 vector lanes with VOPACC int32 accumulators. Drives the
+    4-way constrained-vs-unconstrained search benchmark on the
+    live alveo_u250_firesim_shuttle_gemmini_opu bitstream.
+support:
+  mode: one_step_policy
+  full_model_blocking: true
+  reason: ''
+expected:
+  can_eager_run: true
+  can_torch_compile: true
+  can_dynamo_capture: true
+  can_slice_compile: true
+notes:
+  - Drives the 4-way bench (pipelines A/B/C/D) on Gemmini + Saturn/OPU.
+  - Constraint artifacts (graph_dossier_v3.json, kernel_contracts/*.yaml)
+    produced by this config are read by pipelines C and D; A and B
+    ignore them.
